@@ -125,6 +125,60 @@ func assertRefParent(t *testing.T, repo, ref, expected string) {
 	}
 }
 
+func TestCascadeApplySurfacesRebaseConflicts(t *testing.T) {
+	repo := t.TempDir()
+	mustGit(t, repo, "init", "-b", "master")
+	mustGit(t, repo, "config", "user.name", "test")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+
+	writeFile(t, filepath.Join(repo, "f.txt"), "base\n")
+	mustGit(t, repo, "add", "f.txt")
+	mustGit(t, repo, "commit", "-m", "base")
+
+	mustGit(t, repo, "checkout", "-b", "branch1")
+	writeFile(t, filepath.Join(repo, "f.txt"), "branch1\n")
+	mustGit(t, repo, "commit", "-am", "branch1")
+
+	mustGit(t, repo, "checkout", "master")
+	writeFile(t, filepath.Join(repo, "f.txt"), "master-change\n")
+	mustGit(t, repo, "commit", "-am", "master change")
+
+	writeFile(t, filepath.Join(repo, ConfigFilename), "branch1=master\n")
+
+	app := &App{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	err := app.Execute([]string{"cascade", "--apply"})
+	if err == nil {
+		t.Fatal("expected cascade to fail")
+	}
+	msg := err.Error()
+	for _, want := range []string{"rebase failed for branch1 onto master", "CONFLICT (content): Merge conflict in f.txt", "Could not apply", "conflict detected; resolve it and then run `git rebase --continue` or `git rebase --abort`"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error message missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestCascadeStepErrorFormatting(t *testing.T) {
+	err := (&cascadeStepError{
+		kind:   "merge-aware rebase",
+		branch: "branch4",
+		target: "branch2",
+		output: "CONFLICT (content): Merge conflict in f.txt",
+		err:    exec.ErrNotFound,
+	}).Error()
+	for _, want := range []string{"merge-aware rebase failed for branch4 onto branch2", "CONFLICT (content): Merge conflict in f.txt"} {
+		if !strings.Contains(err, want) {
+			t.Fatalf("formatted error missing %q: %s", want, err)
+		}
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

@@ -57,6 +57,27 @@ type branchPlan struct {
 	UpstreamHash string
 }
 
+type cascadeStepError struct {
+	kind   string
+	branch string
+	target string
+	output string
+	err    error
+}
+
+func (e *cascadeStepError) Error() string {
+	msg := fmt.Sprintf("%s failed for %s onto %s: %v", e.kind, e.branch, e.target, e.err)
+	if trimmed := strings.TrimSpace(e.output); trimmed != "" {
+		msg += "\n" + trimmed
+		if strings.Contains(trimmed, "CONFLICT (") || strings.Contains(trimmed, "Could not apply") {
+			msg += "\nconflict detected; resolve it and then run `git rebase --continue` or `git rebase --abort`"
+		}
+	}
+	return msg
+}
+
+func (e *cascadeStepError) Unwrap() error { return e.err }
+
 func NewApp() *App {
 	return &App{Stdout: os.Stdout, Stderr: os.Stderr}
 }
@@ -246,7 +267,7 @@ func (a *App) runCascade(args []string) error {
 			if err != nil {
 				return err
 			}
-			if err := rebaseBranch(root, plan.Branch, targetHash, plan.UpstreamHash); err != nil {
+			if err := rebaseBranch(root, plan.Branch, plan.TargetRef, targetHash, plan.UpstreamHash, len(cfg.Parents(plan.Branch)) > 1); err != nil {
 				return err
 			}
 			delete(currentHashes, plan.Branch)
@@ -382,12 +403,24 @@ func shortHash(hash string) string {
 	return hash[:7]
 }
 
-func rebaseBranch(root, branch, ontoHash, upstreamHash string) error {
-	cmd := exec.Command("git", "rebase", "--rebase-merges", "--onto", ontoHash, upstreamHash, branch)
+func rebaseBranch(root, branch, targetRef, ontoHash, upstreamRef string, mergeAware bool) error {
+	cmd := exec.Command("git", "rebase", "--rebase-merges", "--onto", ontoHash, upstreamRef, branch)
 	cmd.Dir = root
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	kind := "rebase"
+	if mergeAware {
+		kind = "merge-aware rebase"
+	}
+	return &cascadeStepError{
+		kind:   kind,
+		branch: branch,
+		target: targetRef,
+		output: strings.TrimSpace(string(output)),
+		err:    err,
+	}
 }
 
 func runGit(root string, args ...string) (string, error) {
