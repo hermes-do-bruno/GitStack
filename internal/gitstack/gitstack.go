@@ -259,7 +259,7 @@ func (a *App) runCascade(args []string) error {
 }
 
 func repoRoot() (string, error) {
-	out, err := runGit("")
+	out, err := runGit("", "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", err
 	}
@@ -500,21 +500,20 @@ func (c *ConfigFile) Subtree(root string) ([]string, error) {
 	children := c.childrenMap()
 	visited := map[string]bool{}
 	order := make([]string, 0)
-	var walk func(string)
-	walk = func(branch string) {
+	var walk func(string, bool)
+	walk = func(branch string, include bool) {
 		if visited[branch] {
 			return
 		}
 		visited[branch] = true
-		order = append(order, branch)
+		if include {
+			order = append(order, branch)
+		}
 		for _, child := range children[branch] {
-			walk(child)
+			walk(child, true)
 		}
 	}
-	if !c.containsBranch(root) {
-		return nil, nil
-	}
-	walk(root)
+	walk(root, c.containsBranch(root))
 	return order, nil
 }
 

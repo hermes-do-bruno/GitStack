@@ -55,3 +55,18 @@ func TestSubtreeUsesChildOrder(t *testing.T) {
 		t.Fatalf("order mismatch: want %v got %v", want, order)
 	}
 }
+
+func TestSubtreeOmitsUndeclaredRoot(t *testing.T) {
+	cfg := &ConfigFile{EntryIndexes: map[string]int{}}
+	cfg.Upsert("branch1", []string{"master"})
+	cfg.Upsert("branch2", []string{"branch1"})
+
+	order, err := cfg.Subtree("master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"branch1", "branch2"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("order mismatch: want %v got %v", want, order)
+	}
+}
