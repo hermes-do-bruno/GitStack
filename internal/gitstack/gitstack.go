@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -248,6 +249,7 @@ func (a *App) runCascade(args []string) error {
 			if err := rebaseBranch(root, plan.Branch, targetHash, plan.UpstreamHash); err != nil {
 				return err
 			}
+			delete(currentHashes, plan.Branch)
 			updated, err := refHash(root, plan.Branch, currentHashes)
 			if err != nil {
 				return err
@@ -498,22 +500,68 @@ func (c *ConfigFile) Subtree(root string) ([]string, error) {
 		return nil, nil
 	}
 	children := c.childrenMap()
-	visited := map[string]bool{}
-	order := make([]string, 0)
-	var walk func(string, bool)
-	walk = func(branch string, include bool) {
-		if visited[branch] {
+	reachable := map[string]bool{}
+	var collect func(string)
+	collect = func(branch string) {
+		if reachable[branch] {
 			return
 		}
-		visited[branch] = true
-		if include {
-			order = append(order, branch)
-		}
+		reachable[branch] = true
 		for _, child := range children[branch] {
-			walk(child, true)
+			collect(child)
 		}
 	}
-	walk(root, c.containsBranch(root))
+	if c.containsBranch(root) {
+		collect(root)
+	} else {
+		for _, child := range children[root] {
+			collect(child)
+		}
+	}
+	if len(reachable) == 0 {
+		return nil, nil
+	}
+
+	indegree := map[string]int{}
+	for branch := range reachable {
+		indegree[branch] = 0
+	}
+	for branch := range reachable {
+		for _, parent := range c.Parents(branch) {
+			if reachable[parent] {
+				indegree[branch]++
+			}
+		}
+	}
+
+	queue := make([]string, 0, len(reachable))
+	pushZero := func(branch string) {
+		queue = append(queue, branch)
+		sort.SliceStable(queue, func(i, j int) bool {
+			return c.orderOf(queue[i]) < c.orderOf(queue[j])
+		})
+	}
+	for branch, degree := range indegree {
+		if degree == 0 {
+			pushZero(branch)
+		}
+	}
+
+	order := make([]string, 0, len(reachable))
+	for len(queue) > 0 {
+		branch := queue[0]
+		queue = queue[1:]
+		order = append(order, branch)
+		for _, child := range children[branch] {
+			if !reachable[child] {
+				continue
+			}
+			indegree[child]--
+			if indegree[child] == 0 {
+				pushZero(child)
+			}
+		}
+	}
 	return order, nil
 }
 
@@ -548,6 +596,13 @@ func (c *ConfigFile) childrenMap() map[string][]string {
 func (c *ConfigFile) containsBranch(branch string) bool {
 	_, ok := c.EntryIndexes[branch]
 	return ok
+}
+
+func (c *ConfigFile) orderOf(branch string) int {
+	if idx, ok := c.EntryIndexes[branch]; ok {
+		return idx
+	}
+	return len(c.Lines)
 }
 
 func cloneMap(in map[string]string) map[string]string {

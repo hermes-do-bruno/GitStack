@@ -50,7 +50,7 @@ func TestSubtreeUsesChildOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"root", "left", "leaf", "right"}
+	want := []string{"root", "left", "right", "leaf"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("order mismatch: want %v got %v", want, order)
 	}
@@ -66,6 +66,23 @@ func TestSubtreeOmitsUndeclaredRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"branch1", "branch2"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("order mismatch: want %v got %v", want, order)
+	}
+}
+
+func TestSubtreeTopologicalOrderForMergeBranches(t *testing.T) {
+	cfg := &ConfigFile{EntryIndexes: map[string]int{}}
+	cfg.Upsert("branch1", []string{"master"})
+	cfg.Upsert("branch2", []string{"branch1"})
+	cfg.Upsert("branch3", []string{"branch1"})
+	cfg.Upsert("branch4", []string{"branch2", "branch3"})
+
+	order, err := cfg.Subtree("master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"branch1", "branch2", "branch3", "branch4"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("order mismatch: want %v got %v", want, order)
 	}
