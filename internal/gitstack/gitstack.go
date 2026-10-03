@@ -66,11 +66,11 @@ type cascadeStepError struct {
 }
 
 func (e *cascadeStepError) Error() string {
-	msg := fmt.Sprintf("%s failed for %s onto %s: %v", e.kind, e.branch, e.target, e.err)
+	msg := fmt.Sprintf("git-stack: %s failed for %s onto %s: %v", e.kind, e.branch, e.target, e.err)
 	if trimmed := strings.TrimSpace(e.output); trimmed != "" {
 		msg += "\n" + trimmed
 		if strings.Contains(trimmed, "CONFLICT (") || strings.Contains(trimmed, "Could not apply") {
-			msg += "\nconflict detected; resolve it and then run `git rebase --continue` or `git rebase --abort`"
+			msg += "\ngit-stack: conflict detected; resolve it and then run `git rebase --continue` or `git rebase --abort`"
 		}
 	}
 	return msg
@@ -97,7 +97,7 @@ func (a *App) Execute(args []string) error {
 	case "help", "--help", "-h":
 		return a.usage()
 	default:
-		return fmt.Errorf("unknown command %q", args[0])
+		return cliErrorf("unknown command %q", args[0])
 	}
 }
 
@@ -108,7 +108,7 @@ func (a *App) usage() error {
 
 func (a *App) runParent(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: git-stack parent <parent> [<parent>...]")
+		return cliErrorf("usage: git-stack parent <parent> [<parent>...]")
 	}
 
 	root, err := repoRoot()
@@ -153,7 +153,7 @@ func (a *App) runGraph() error {
 		return err
 	}
 	if len(order) == 0 {
-		return fmt.Errorf("branch %q is not declared in %s", current, ConfigFilename)
+		return cliErrorf("branch %q is not declared in %s", current, ConfigFilename)
 	}
 
 	cache := map[string]string{}
@@ -187,7 +187,7 @@ func (a *App) runCascade(args []string) error {
 		}
 	}
 	if len(args) > 0 {
-		return fmt.Errorf("usage: git-stack cascade [--apply]")
+		return cliErrorf("usage: git-stack cascade [--apply]")
 	}
 
 	root, err := repoRoot()
@@ -207,7 +207,7 @@ func (a *App) runCascade(args []string) error {
 		return err
 	}
 	if len(order) == 0 {
-		return fmt.Errorf("branch %q is not declared in %s", current, ConfigFilename)
+		return cliErrorf("branch %q is not declared in %s", current, ConfigFilename)
 	}
 
 	allRefs := cfg.RelevantRefs(order)
@@ -247,7 +247,7 @@ func (a *App) runCascade(args []string) error {
 		}
 		upstreamHash, ok := original[targetRef]
 		if !ok {
-			return fmt.Errorf("missing original hash for parent %q", targetRef)
+			return cliErrorf("missing original hash for parent %q", targetRef)
 		}
 		plans = append(plans, branchPlan{Branch: branch, Hash: branchHash, State: state, Action: fmt.Sprintf("rebase onto %s", shortHash(targetHash)), TargetRef: targetRef, UpstreamHash: upstreamHash})
 	}
@@ -296,7 +296,7 @@ func currentBranch(root string) (string, error) {
 	}
 	branch := strings.TrimSpace(out)
 	if branch == "" {
-		return "", errors.New("detached HEAD is not supported")
+		return "", cliErrorf("detached HEAD is not supported")
 	}
 	return branch, nil
 }
@@ -430,7 +430,7 @@ func runGit(root string, args ...string) (string, error) {
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		return "", cliErrorf("git %s failed: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
 }
@@ -456,11 +456,11 @@ func loadConfig(path string) (*ConfigFile, error) {
 		default:
 			branch, parents, ok := strings.Cut(line, "=")
 			if !ok {
-				return nil, fmt.Errorf("invalid line in %s: %q", path, line)
+				return nil, cliErrorf("invalid line in %s: %q", path, line)
 			}
 			branch = strings.TrimSpace(branch)
 			if branch == "" {
-				return nil, fmt.Errorf("invalid branch name in %s: %q", path, line)
+				return nil, cliErrorf("invalid branch name in %s: %q", path, line)
 			}
 			parentsList := parseCSVList(parents)
 			cfg.EntryIndexes[branch] = len(cfg.Lines)
@@ -522,7 +522,7 @@ func (c *ConfigFile) Save(path string) error {
 			b.WriteString(strings.Join(line.Parents, ","))
 			b.WriteString("\n")
 		default:
-			return fmt.Errorf("unsupported line kind at index %d", i)
+			return cliErrorf("unsupported line kind at index %d", i)
 		}
 	}
 	return os.WriteFile(path, []byte(b.String()), 0o644)
@@ -644,4 +644,8 @@ func cloneMap(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func cliErrorf(format string, args ...any) error {
+	return fmt.Errorf("git-stack: "+format, args...)
 }
