@@ -8,6 +8,48 @@ Git Stack is a Go CLI for stacked branches. It reads `.git-stack`, shows branch 
 - Git
 - Optional: Docker
 
+## Install
+
+Download the release archive for your OS and architecture from GitHub Releases, then install the binary.
+
+### macOS
+
+```bash
+VERSION=v0.1.0-alpha.0
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64) ARCH=x64 ;;
+  arm64) ARCH=arm64 ;;
+  *) echo "unsupported architecture: $ARCH"; exit 1 ;;
+esac
+curl -L -o /tmp/git-stack.tar.gz \
+  "https://github.com/hermes-do-bruno/GitStack/releases/download/${VERSION}/git-stack-macos-${ARCH}.tar.gz"
+tar -xzf /tmp/git-stack.tar.gz -C /tmp
+sudo install -m 755 /tmp/git-stack /usr/local/bin/git-stack
+```
+
+### Linux
+
+```bash
+VERSION=v0.1.0-alpha.0
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64) ARCH=x64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) echo "unsupported architecture: $ARCH"; exit 1 ;;
+esac
+curl -L -o /tmp/git-stack.tar.gz \
+  "https://github.com/hermes-do-bruno/GitStack/releases/download/${VERSION}/git-stack-linux-${ARCH}.tar.gz"
+tar -xzf /tmp/git-stack.tar.gz -C /tmp
+sudo install -m 755 /tmp/git-stack /usr/local/bin/git-stack
+```
+
+To verify the install:
+
+```bash
+git-stack help
+```
+
 ## Build without Docker
 
 Run the test suite first:
