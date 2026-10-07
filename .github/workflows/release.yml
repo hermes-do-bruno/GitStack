@@ -43,8 +43,7 @@ jobs:
 
       - name: Build
         run: |
-          mkdir -p dist
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags "-X github.com/hermes-do-bruno/GitStack/internal/gitstack.Version=${VERSION}" -o dist/git-stack ./cmd/git-stack
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} VERSION=${VERSION} make release-build
           tar -czf dist/${{ matrix.artifact_name }}.tar.gz -C dist git-stack
           sha256sum dist/${{ matrix.artifact_name }}.tar.gz > dist/${{ matrix.artifact_name }}.tar.gz.sha256
 

@@ -55,15 +55,16 @@ git-stack version
 Run the test suite first:
 
 ```bash
-go test ./...
+make test
 ```
 
 Build the binary:
 
 ```bash
-mkdir -p bin
-go build -o bin/git-stack ./cmd/git-stack
+make build
 ```
+
+The build reads the current git tag automatically. If the checkout is not on a tag, it falls back to `dev`.
 
 Run it locally:
 
@@ -82,14 +83,13 @@ docker build -t git-stack-dev .
 Run the tests inside the container:
 
 ```bash
-docker run --rm -v "$PWD:/workspace" -w /workspace git-stack-dev go test ./...
+docker run --rm -v "$PWD:/workspace" -w /workspace git-stack-dev make test
 ```
 
 Build the binary inside the container:
 
 ```bash
-mkdir -p bin
-docker run --rm -v "$PWD:/workspace" -w /workspace git-stack-dev go build -o bin/git-stack ./cmd/git-stack
+docker run --rm -v "$PWD:/workspace" -w /workspace git-stack-dev make build
 ```
 
 Run the binary from the host after the Docker build:
