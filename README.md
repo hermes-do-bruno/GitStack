@@ -56,7 +56,24 @@ Run the binary from the host after the Docker build:
 ./bin/git-stack help
 ```
 
-## Commands
+## Release Workflow
+
+Tag a release to trigger the GitHub Actions workflow:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow builds release archives for:
+
+- Linux x64
+- Linux arm64
+- macOS x64
+- macOS arm64
+
+Each archive includes the `git-stack` binary and a SHA-256 checksum.
+
 
 - `git-stack parent [name]` — set the current branch parent(s) in `.git-stack`
 - `git-stack graph` — show the branch graph and sync state
