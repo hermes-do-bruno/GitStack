@@ -175,9 +175,9 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 
 	output := stdout.String() + stderr.String()
 	for _, want := range []string{
-		"git-stack parent <parent> [<parent>...]",
-		"git-stack graph",
-		"git-stack cascade [--apply]",
+		"git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack",
+		"git-stack graph                          Show the branch graph and sync state",
+		"git-stack cascade [--apply]              Plan or apply the cascade from the current branch",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("top-level help missing %q:\n%s", want, output)
