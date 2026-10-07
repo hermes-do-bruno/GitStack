@@ -1,3 +1,3 @@
-module git-cascade
+module github.com/hermes-do-bruno/GitStack
 
 go 1.26

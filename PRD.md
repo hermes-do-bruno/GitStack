@@ -1,4 +1,4 @@
-# Git Cascade PRD
+# Git Stack PRD
 
 ## Problem Statement
 

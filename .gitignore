@@ -1,4 +1,5 @@
 bin/
+git-stack
 *.exe
 *.test
 coverage.out

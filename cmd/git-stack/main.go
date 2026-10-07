@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"git-cascade/internal/gitstack"
+	"github.com/hermes-do-bruno/GitStack/internal/gitstack"
 )
 
 func main() {
