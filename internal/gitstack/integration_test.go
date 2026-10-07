@@ -178,6 +178,7 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 		"git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack",
 		"git-stack graph                          Show the branch graph and sync state",
 		"git-stack cascade [--apply]              Plan or apply the cascade from the current branch",
+		"git-stack version                        Show the CLI version",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("top-level help missing %q:\n%s", want, output)
@@ -188,6 +189,7 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 		"parent":  "usage: git-stack parent <parent> [<parent>...]",
 		"graph":   "usage: git-stack graph",
 		"cascade": "usage: git-stack cascade [--apply]",
+		"version": "usage: git-stack version",
 	}
 	for command, want := range cases {
 		stdout.Reset()
@@ -199,6 +201,23 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("%s help missing %q:\n%s", command, want, output)
 		}
+	}
+}
+
+func TestVersionCommand(t *testing.T) {
+	var stdout bytes.Buffer
+	app := &App{Stdout: &stdout, Stderr: &bytes.Buffer{}}
+
+	if err := app.Execute([]string{"version"}); err != nil {
+		t.Fatalf("Execute(version) failed: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	if output == "" {
+		t.Fatal("version output is empty")
+	}
+	if output != Version {
+		t.Fatalf("version output mismatch: want %q got %q", Version, output)
 	}
 }
 

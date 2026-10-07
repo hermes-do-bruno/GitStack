@@ -47,7 +47,7 @@ sudo install -m 755 /tmp/git-stack /usr/local/bin/git-stack
 To verify the install:
 
 ```bash
-git-stack help
+git-stack version
 ```
 
 ## Build without Docker
@@ -120,3 +120,4 @@ Each archive includes the `git-stack` binary and a SHA-256 checksum.
 - `git-stack parent [name]` — set the current branch parent(s) in `.git-stack`
 - `git-stack graph` — show the branch graph and sync state
 - `git-stack cascade [--apply]` — plan or apply the cascade from the current branch
+- `git-stack version` — show the CLI version

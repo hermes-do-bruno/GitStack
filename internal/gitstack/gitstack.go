@@ -19,6 +19,8 @@ type App struct {
 	Stderr io.Writer
 }
 
+var Version = "dev"
+
 type BranchState string
 
 const (
@@ -103,6 +105,11 @@ func (a *App) Execute(args []string) error {
 			return a.cascadeHelp()
 		}
 		return a.runCascade(args[1:])
+	case "version", "--version", "-v":
+		if hasHelpFlag(args[1:]) {
+			return a.versionHelp()
+		}
+		return a.version()
 	case "help", "--help", "-h":
 		return a.help()
 	default:
@@ -112,6 +119,16 @@ func (a *App) Execute(args []string) error {
 
 func (a *App) help() error {
 	_, err := fmt.Fprintln(a.Stdout, helpText())
+	return err
+}
+
+func (a *App) version() error {
+	_, err := fmt.Fprintln(a.Stdout, Version)
+	return err
+}
+
+func (a *App) versionHelp() error {
+	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack version")
 	return err
 }
 
@@ -140,6 +157,7 @@ Commands:
   git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack
   git-stack graph                          Show the branch graph and sync state
   git-stack cascade [--apply]              Plan or apply the cascade from the current branch
+  git-stack version                        Show the CLI version
   git-stack help                           Show this help
   git-stack --help                         Show this help
   git-stack -h                             Show this help
