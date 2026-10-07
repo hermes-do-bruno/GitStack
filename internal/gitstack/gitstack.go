@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-const ConfigFilename = ".git-cascade"
+const ConfigFilename = ".git-stack"
 
 type App struct {
 	Stdout io.Writer

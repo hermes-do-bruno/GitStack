@@ -1,6 +1,6 @@
 # Git Stack
 
-Git Stack is a Go CLI for stacked branches. It reads `.git-cascade`, shows branch state graphs, and runs cascade rebases from the current branch.
+Git Stack is a Go CLI for stacked branches. It reads `.git-stack`, shows branch state graphs, and runs cascade rebases from the current branch.
 
 ## Requirements
 
@@ -58,6 +58,6 @@ Run the binary from the host after the Docker build:
 
 ## Commands
 
-- `git-stack parent [name]` — set the current branch parent(s) in `.git-cascade`
+- `git-stack parent [name]` — set the current branch parent(s) in `.git-stack`
 - `git-stack graph` — show the branch graph and sync state
 - `git-stack cascade [--apply]` — plan or apply the cascade from the current branch

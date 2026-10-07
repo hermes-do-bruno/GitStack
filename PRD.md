@@ -6,11 +6,11 @@ Users who work with stacked branches need a tool to keep dependent branches alig
 
 ## Solution
 
-Build a CLI tool that reads a root-level `.git-cascade` file, shows the declared branch cascade and synchronization state, and performs top-down cascade from the current branch through its declared descendants. The tool must handle branches with merge commits, use the first parent as the mainline, and render a graph that shows declared branches and whether each one is synchronized.
+Build a CLI tool that reads a root-level `.git-stack` file, shows the declared branch cascade and synchronization state, and performs top-down cascade from the current branch through its declared descendants. The tool must handle branches with merge commits, use the first parent as the mainline, and render a graph that shows declared branches and whether each one is synchronized.
 
 ## Source of Truth
 
-The repository root contains a `.git-cascade` file.
+The repository root contains a `.git-stack` file.
 
 Format:
 
@@ -64,7 +64,7 @@ State calculation rules:
 
 - Implement the CLI in Go.
 - Use Git as the source of truth for repository state and rebasing behavior.
-- Parse `.git-cascade` as a simple key-value file with comma-separated values.
+- Parse `.git-stack` as a simple key-value file with comma-separated values.
 - Use ancestry and declared relationships to derive branch state.
 - Keep graph rendering separate from sync execution.
 - Prefer a terminal-friendly graph output first.
@@ -95,13 +95,13 @@ State calculation rules:
 
 ## Further Notes
 
-The project should stay explicit and deterministic. The `.git-cascade` file defines intent, the graph shows reality, and `cascade` reconciles the two from the current branch downward.
+The project should stay explicit and deterministic. The `.git-stack` file defines intent, the graph shows reality, and `cascade` reconciles the two from the current branch downward.
 
 ## CLI Surface
 
 Proposed commands:
 
-- `git-stack parent [name]` — create or update the current branch's parent entry in `.git-cascade` using the current branch name and one or more comma-separated parent names.
+- `git-stack parent [name]` — create or update the current branch's parent entry in `.git-stack` using the current branch name and one or more comma-separated parent names.
 - `git-stack graph` — show branch states and cascade structure.
 - `git-stack cascade` — dry-run the cascade starting from the current branch.
 
@@ -123,7 +123,7 @@ Behavior:
 - `cascade --apply` replaces the commit subject field with the planned action for that branch.
 - `cascade --apply` renders the action as `rebase onto <target>` for rebase steps and `skip merged` for merged branches.
 - Dry-run output shows one line per planned branch action with the target base.
-- The declaration order in `.git-cascade` defines child ordering.
-- `parent [name]` updates the root `.git-cascade` file rather than inferring config from hidden state.
+- The declaration order in `.git-stack` defines child ordering.
+- `parent [name]` updates the root `.git-stack` file rather than inferring config from hidden state.
 - `parent [name]` preserves existing comments and blank lines when rewriting the file.
 - `parent [name]` replaces the existing parent list for the current branch when one already exists.
