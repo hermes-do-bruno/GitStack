@@ -84,26 +84,84 @@ func NewApp() *App {
 
 func (a *App) Execute(args []string) error {
 	if len(args) == 0 {
-		return a.usage()
+		return a.help()
 	}
 
 	switch args[0] {
 	case "parent":
+		if hasHelpFlag(args[1:]) {
+			return a.parentHelp()
+		}
 		return a.runParent(args[1:])
 	case "graph":
+		if hasHelpFlag(args[1:]) {
+			return a.graphHelp()
+		}
 		return a.runGraph()
 	case "cascade":
+		if hasHelpFlag(args[1:]) {
+			return a.cascadeHelp()
+		}
 		return a.runCascade(args[1:])
 	case "help", "--help", "-h":
-		return a.usage()
+		return a.help()
 	default:
 		return cliErrorf("unknown command %q", args[0])
 	}
 }
 
-func (a *App) usage() error {
-	_, err := fmt.Fprintln(a.Stderr, "usage: git-stack <parent|graph|cascade> [args]")
+func (a *App) help() error {
+	_, err := fmt.Fprintln(a.Stdout, helpText())
 	return err
+}
+
+func (a *App) parentHelp() error {
+	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack parent <parent> [<parent>...]")
+	return err
+}
+
+func (a *App) graphHelp() error {
+	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack graph")
+	return err
+}
+
+func (a *App) cascadeHelp() error {
+	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack cascade [--apply]")
+	return err
+}
+
+func helpText() string {
+	return strings.TrimSpace(`git-stack - stacked-branch workflow tool
+
+Usage:
+  git-stack <command> [args]
+
+Commands:
+  git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack
+  git-stack graph                          Show the branch graph and sync state
+  git-stack cascade [--apply]              Plan or apply the cascade from the current branch
+  git-stack help                           Show this help
+  git-stack --help                         Show this help
+  git-stack -h                             Show this help
+
+Examples:
+  git-stack parent master
+  git-stack graph
+  git-stack cascade --apply`)
+}
+
+func hasHelpFlag(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "help", "--help", "-h":
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) usage() error {
+	return a.help()
 }
 
 func (a *App) runParent(args []string) error {

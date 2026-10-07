@@ -164,6 +164,44 @@ func TestCascadeApplySurfacesRebaseConflicts(t *testing.T) {
 	}
 }
 
+func TestHelpShowsCommandsAndParameters(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := &App{Stdout: &stdout, Stderr: &stderr}
+
+	if err := app.Execute([]string{"--help"}); err != nil {
+		t.Fatalf("Execute(--help) failed: %v", err)
+	}
+
+	output := stdout.String() + stderr.String()
+	for _, want := range []string{
+		"git-stack parent <parent> [<parent>...]",
+		"git-stack graph",
+		"git-stack cascade [--apply]",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("top-level help missing %q:\n%s", want, output)
+		}
+	}
+
+	cases := map[string]string{
+		"parent":  "usage: git-stack parent <parent> [<parent>...]",
+		"graph":   "usage: git-stack graph",
+		"cascade": "usage: git-stack cascade [--apply]",
+	}
+	for command, want := range cases {
+		stdout.Reset()
+		stderr.Reset()
+		if err := app.Execute([]string{command, "--help"}); err != nil {
+			t.Fatalf("Execute(%s --help) failed: %v", command, err)
+		}
+		output := stdout.String() + stderr.String()
+		if !strings.Contains(output, want) {
+			t.Fatalf("%s help missing %q:\n%s", command, want, output)
+		}
+	}
+}
+
 func TestCascadeStepErrorFormatting(t *testing.T) {
 	err := (&cascadeStepError{
 		kind:   "merge-aware rebase",
