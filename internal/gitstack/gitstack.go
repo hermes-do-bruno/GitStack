@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode/utf8"
 )
 
 const ConfigFilename = ".git-stack"
@@ -61,10 +60,11 @@ type branchPlan struct {
 }
 
 type graphRow struct {
-	Hash   string
-	State  string
-	Branch string
-	Title  string
+	Hash    string
+	State   string
+	Branch  string
+	Title   string
+	Parents []string
 }
 
 type cascadeStepError struct {
@@ -330,8 +330,13 @@ func (a *App) runGraph() error {
 		return cliErrorf("branch %q is not declared in %s", current, ConfigFilename)
 	}
 
+	reachable := make(map[string]bool, len(order))
+	for _, branch := range order {
+		reachable[branch] = true
+	}
+
 	cache := map[string]string{}
-	rows := make([]graphRow, 0, len(order))
+	rows := make(map[string]graphRow, len(order))
 	for _, branch := range order {
 		hash, err := refHash(root, branch, cache)
 		if err != nil {
@@ -345,60 +350,130 @@ func (a *App) runGraph() error {
 		if err != nil {
 			return err
 		}
-		rows = append(rows, graphRow{
-			Hash:   shortHash(hash),
-			State:  string(state),
-			Branch: branch,
-			Title:  title,
-		})
+		rows[branch] = graphRow{
+			Hash:    shortHash(hash),
+			State:   string(state),
+			Branch:  branch,
+			Title:   title,
+			Parents: cfg.Parents(branch),
+		}
 	}
 
-	return writeGraphTable(a.Stdout, rows)
+	children := cfg.childrenMap()
+	roots := graphRoots(cfg, current, order, reachable)
+	return writeGraphTree(a.Stdout, cfg, roots, children, rows, reachable)
 }
 
-func writeGraphTable(w io.Writer, rows []graphRow) error {
-	headers := []string{"Hash", "State", "Branch", "Title"}
-	widths := []int{
-		runeLen(headers[0]),
-		runeLen(headers[1]),
-		runeLen(headers[2]),
-		runeLen(headers[3]),
+func graphRoots(cfg *ConfigFile, current string, order []string, reachable map[string]bool) []string {
+	if cfg.containsBranch(current) {
+		return []string{current}
 	}
-	for _, row := range rows {
-		widths[0] = max(widths[0], runeLen(row.Hash))
-		widths[1] = max(widths[1], runeLen(row.State))
-		widths[2] = max(widths[2], runeLen(row.Branch))
-		widths[3] = max(widths[3], runeLen(row.Title))
-	}
-
-	line := func(cols ...string) string {
-		parts := make([]string, len(cols))
-		for i, col := range cols {
-			parts[i] = padRight(col, widths[i])
+	roots := make([]string, 0, len(order))
+	for _, branch := range order {
+		parents := cfg.Parents(branch)
+		isRoot := true
+		for _, parent := range parents {
+			if reachable[parent] {
+				isRoot = false
+				break
+			}
 		}
-		return strings.Join(parts, "  ")
-	}
-
-	separator := func() string {
-		parts := make([]string, len(widths))
-		for i, width := range widths {
-			parts[i] = strings.Repeat("-", width)
+		if isRoot {
+			roots = append(roots, branch)
 		}
-		return strings.Join(parts, "  ")
 	}
+	sort.SliceStable(roots, func(i, j int) bool {
+		return cfg.orderOf(roots[i]) < cfg.orderOf(roots[j])
+	})
+	return roots
+}
 
-	if _, err := fmt.Fprintln(w, line(headers...)); err != nil {
+func writeGraphTree(w io.Writer, cfg *ConfigFile, roots []string, children map[string][]string, rows map[string]graphRow, reachable map[string]bool) error {
+	if _, err := fmt.Fprintln(w, "Graph:"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(w, separator()); err != nil {
-		return err
-	}
-	for _, row := range rows {
-		if _, err := fmt.Fprintln(w, line(row.Hash, row.State, row.Branch, row.Title)); err != nil {
+	for i, root := range roots {
+		if i > 0 {
+			if _, err := fmt.Fprintln(w); err != nil {
+				return err
+			}
+		}
+		if err := writeGraphNode(w, cfg, children, rows, reachable, root, "", true, true, map[string]bool{}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func writeGraphNode(w io.Writer, cfg *ConfigFile, children map[string][]string, rows map[string]graphRow, reachable map[string]bool, branch, prefix string, isRoot, last bool, path map[string]bool) error {
+	if path[branch] {
+		return cliErrorf("cycle detected in %s at %q", ConfigFilename, branch)
+	}
+	path[branch] = true
+	defer delete(path, branch)
+
+	row, ok := rows[branch]
+	if !ok {
+		return cliErrorf("branch %q is not declared in %s", branch, ConfigFilename)
+	}
+	label := graphNodeLabel(row)
+	if isRoot {
+		if _, err := fmt.Fprintln(w, label); err != nil {
+			return err
+		}
+	} else {
+		connector := "├──"
+		if last {
+			connector = "└──"
+		}
+		if _, err := fmt.Fprintf(w, "%s%s %s\n", prefix, connector, label); err != nil {
+			return err
+		}
+	}
+
+	nextPrefix := prefix
+	if !isRoot {
+		if last {
+			nextPrefix += "    "
+		} else {
+			nextPrefix += "│   "
+		}
+	}
+
+	branchChildren := graphChildren(cfg, children, branch, reachable)
+	for i, child := range branchChildren {
+		if err := writeGraphNode(w, cfg, children, rows, reachable, child, nextPrefix, false, i == len(branchChildren)-1, path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func graphNodeLabel(row graphRow) string {
+	label := fmt.Sprintf("%s [%s] %s %s", row.Branch, row.State, row.Hash, row.Title)
+	if len(row.Parents) > 1 {
+		label += " (parents: " + strings.Join(row.Parents, ", ") + ")"
+	}
+	return label
+}
+
+func graphChildren(cfg *ConfigFile, children map[string][]string, branch string, reachable map[string]bool) []string {
+	list := append([]string(nil), children[branch]...)
+	filtered := make([]string, 0, len(list))
+	for _, child := range list {
+		if !reachable[child] {
+			continue
+		}
+		parents := cfg.Parents(child)
+		if len(parents) == 0 || parents[0] != branch {
+			continue
+		}
+		filtered = append(filtered, child)
+	}
+	sort.SliceStable(filtered, func(i, j int) bool {
+		return cfg.orderOf(filtered[i]) < cfg.orderOf(filtered[j])
+	})
+	return filtered
 }
 
 func (a *App) runCascade(args []string) error {
@@ -624,25 +699,6 @@ func shortHash(hash string) string {
 		return hash
 	}
 	return hash[:7]
-}
-
-func runeLen(s string) int {
-	return utf8.RuneCountInString(s)
-}
-
-func padRight(s string, width int) string {
-	missing := width - runeLen(s)
-	if missing <= 0 {
-		return s
-	}
-	return s + strings.Repeat(" ", missing)
-}
-
-func max(a, b int) int {
-	if b > a {
-		return b
-	}
-	return a
 }
 
 func rebaseBranch(root, branch, targetRef, ontoHash, upstreamRef string, mergeAware bool) error {

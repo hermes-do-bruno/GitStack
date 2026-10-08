@@ -205,7 +205,7 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 	}
 }
 
-func TestGraphCommandFormatsTable(t *testing.T) {
+func TestGraphCommandRendersTree(t *testing.T) {
 	repo := t.TempDir()
 	mustGit(t, repo, "init", "-b", "master")
 	mustGit(t, repo, "config", "user.name", "test")
@@ -216,22 +216,34 @@ func TestGraphCommandFormatsTable(t *testing.T) {
 	mustGit(t, repo, "commit", "-m", "root commit")
 	masterHash := gitRevParse(t, repo, "master")
 
-	mustGit(t, repo, "checkout", "-b", "branch-one")
-	writeFile(t, filepath.Join(repo, "one.txt"), "one\n")
-	mustGit(t, repo, "add", "one.txt")
+	mustGit(t, repo, "checkout", "-b", "branch1")
+	writeFile(t, filepath.Join(repo, "branch1.txt"), "branch1\n")
+	mustGit(t, repo, "add", "branch1.txt")
 	mustGit(t, repo, "commit", "-m", "branch one")
-	branchOneHash := gitRevParse(t, repo, "branch-one")
+	branch1Hash := gitRevParse(t, repo, "branch1")
 
-	mustGit(t, repo, "checkout", "-b", "branch-two")
-	writeFile(t, filepath.Join(repo, "two.txt"), "two\n")
-	mustGit(t, repo, "add", "two.txt")
+	mustGit(t, repo, "checkout", "-b", "branch2")
+	writeFile(t, filepath.Join(repo, "branch2.txt"), "branch2\n")
+	mustGit(t, repo, "add", "branch2.txt")
 	mustGit(t, repo, "commit", "-m", "branch two")
-	branchTwoHash := gitRevParse(t, repo, "branch-two")
+	branch2Hash := gitRevParse(t, repo, "branch2")
+
+	mustGit(t, repo, "checkout", "-b", "branch3", "branch1")
+	writeFile(t, filepath.Join(repo, "branch3.txt"), "branch3\n")
+	mustGit(t, repo, "add", "branch3.txt")
+	mustGit(t, repo, "commit", "-m", "branch three")
+	branch3Hash := gitRevParse(t, repo, "branch3")
+
+	mustGit(t, repo, "checkout", "-b", "branch4", "branch2")
+	mustGit(t, repo, "merge", "--no-ff", "branch3", "-m", "merge branch3 into branch4")
+	branch4Hash := gitRevParse(t, repo, "branch4")
 
 	writeFile(t, filepath.Join(repo, ConfigFilename), strings.Join([]string{
 		"master=",
-		"branch-one=master",
-		"branch-two=branch-one",
+		"branch1=master",
+		"branch2=branch1",
+		"branch3=branch1",
+		"branch4=branch2,branch3",
 		"",
 	}, "\n"))
 
@@ -250,56 +262,29 @@ func TestGraphCommandFormatsTable(t *testing.T) {
 
 	raw := app.Stdout.(*bytes.Buffer).String()
 	lines := strings.Split(strings.TrimRight(raw, "\n"), "\n")
-	if len(lines) != 5 {
-		t.Fatalf("expected 5 lines, got %d:\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 6 {
+		t.Fatalf("expected 6 lines, got %d:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-
-	header := lines[0]
-	separator := lines[1]
-	if !strings.Contains(header, "Hash") || !strings.Contains(header, "State") || !strings.Contains(header, "Branch") || !strings.Contains(header, "Title") {
-		t.Fatalf("header missing columns:\n%s", header)
+	if lines[0] != "Graph:" {
+		t.Fatalf("missing graph title: %q", lines[0])
 	}
-	if len(separator) != len(header) {
-		t.Fatalf("separator length mismatch: header=%d separator=%d", len(header), len(separator))
+	if !strings.HasPrefix(lines[1], "master [Unsync] "+masterHash[:7]+" ") {
+		t.Fatalf("unexpected root line:\n%s", lines[1])
 	}
-	for _, line := range lines[2:] {
-		if len(line) != len(header) {
-			t.Fatalf("row length mismatch: want %d got %d\n%s", len(header), len(line), line)
-		}
+	if !strings.HasPrefix(lines[2], "└── branch1 [Sync] "+branch1Hash[:7]+" ") {
+		t.Fatalf("unexpected branch1 line:\n%s", lines[2])
 	}
-
-	hashCol := strings.Index(header, "Hash")
-	stateCol := strings.Index(header, "State")
-	branchCol := strings.Index(header, "Branch")
-	titleCol := strings.Index(header, "Title")
-	for _, want := range []string{masterHash[:7], branchOneHash[:7], branchTwoHash[:7]} {
-		if !strings.Contains(app.Stdout.(*bytes.Buffer).String(), want) {
-			t.Fatalf("output missing hash %s:\n%s", want, app.Stdout.(*bytes.Buffer).String())
-		}
+	if !strings.HasPrefix(lines[3], "    ├── branch2 [Sync] "+branch2Hash[:7]+" ") {
+		t.Fatalf("unexpected branch2 line:\n%s", lines[3])
 	}
-	for _, row := range []struct {
-		line  string
-		hash  string
-		state string
-		branch string
-		title string
-	}{
-		{lines[2], masterHash[:7], "Unsync", "master", "root commit"},
-		{lines[3], branchOneHash[:7], "Sync", "branch-one", "branch one"},
-		{lines[4], branchTwoHash[:7], "Sync", "branch-two", "branch two"},
-	} {
-		if strings.Index(row.line, row.hash) != hashCol {
-			t.Fatalf("hash column not aligned for %q:\n%s", row.branch, row.line)
-		}
-		if strings.Index(row.line, row.state) != stateCol {
-			t.Fatalf("state column not aligned for %q:\n%s", row.branch, row.line)
-		}
-		if strings.Index(row.line, row.branch) != branchCol {
-			t.Fatalf("branch column not aligned for %q:\n%s", row.branch, row.line)
-		}
-		if strings.Index(row.line, row.title) != titleCol {
-			t.Fatalf("title column not aligned for %q:\n%s", row.branch, row.line)
-		}
+	if !strings.Contains(lines[4], "branch4 [Partial-sync] "+branch4Hash[:7]+" merge branch3 into branch4") {
+		t.Fatalf("unexpected branch4 line:\n%s", lines[4])
+	}
+	if !strings.Contains(lines[4], "(parents: branch2, branch3)") {
+		t.Fatalf("branch4 line missing parent annotation:\n%s", lines[4])
+	}
+	if !strings.HasPrefix(lines[5], "    └── branch3 [Sync] "+branch3Hash[:7]+" ") {
+		t.Fatalf("unexpected branch3 line:\n%s", lines[5])
 	}
 }
 
