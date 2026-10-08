@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 repo="hermes-do-bruno/GitStack"
 
@@ -22,24 +22,33 @@ Examples:
 EOF
 }
 
-if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
-  usage
-  exit 0
-fi
+case "${1-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
 
 latest_version() {
   curl -fsSL \
     -H 'Accept: application/vnd.github+json' \
     -H 'User-Agent: GitStack installer' \
     "https://api.github.com/repos/${repo}/releases/latest" \
-    | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"' \
-    | head -n1 \
-    | cut -d'"' -f4
+    | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -n1
 }
 
-version="${VERSION:-${1:-}}"
-if [[ -z "$version" || "$version" == "latest" ]]; then
+version="${VERSION-}"
+if [ -z "$version" ] && [ -n "${1-}" ]; then
+  version="$1"
+fi
+if [ -z "$version" ] || [ "$version" = "latest" ]; then
   version="$(latest_version)"
+fi
+
+if [ -z "$version" ]; then
+  echo "could not determine the latest GitHub release tag" >&2
+  exit 1
 fi
 
 os="$(uname -s)"
@@ -66,18 +75,18 @@ esac
 asset="git-stack-${platform}-${arch}.tar.gz"
 url="https://github.com/${repo}/releases/download/${version}/${asset}"
 
-if [[ ${PRINT_URL:-0} == 1 ]]; then
+if [ "${PRINT_URL-0}" = 1 ]; then
   printf '%s\n' "$url"
   exit 0
 fi
 
 tmpdir="$(mktemp -d)"
-trap 'rm -rf "$tmpdir"' EXIT
+trap 'rm -rf "$tmpdir"' EXIT HUP INT TERM
 
 curl -fsSL -o "$tmpdir/$asset" "$url"
 tar -xzf "$tmpdir/$asset" -C "$tmpdir"
 
-prefix="${PREFIX:-/usr/local}"
+prefix="${PREFIX-/usr/local}"
 install_dir="$prefix/bin"
 mkdir -p "$install_dir"
 install -m 755 "$tmpdir/git-stack" "$install_dir/git-stack"

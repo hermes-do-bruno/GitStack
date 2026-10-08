@@ -13,15 +13,15 @@ Git Stack is a Go CLI for stacked branches. It reads `.git-stack`, shows branch 
 Use the install script to detect the current OS and architecture automatically.
 
 ```bash
-./scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/hermes-do-bruno/GitStack/main/scripts/install.sh | sh
 ```
 
-If you want a specific release, pass the version explicitly:
+If you want a specific release, download the installer script and pass the version explicitly:
 
 ```bash
-VERSION=v0.1.0-alpha.2 ./scripts/install.sh
-# or
-./scripts/install.sh v0.1.0-alpha.2
+curl -fsSL -o /tmp/git-stack-install.sh \
+  https://raw.githubusercontent.com/hermes-do-bruno/GitStack/main/scripts/install.sh
+VERSION=v0.1.0-alpha.2 sh /tmp/git-stack-install.sh
 ```
 
 The script also accepts `latest` to force the newest GitHub release tag.
