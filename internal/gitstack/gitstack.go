@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 const ConfigFilename = ".git-stack"
@@ -57,6 +58,13 @@ type branchPlan struct {
 	Action       string
 	TargetRef    string
 	UpstreamHash string
+}
+
+type graphRow struct {
+	Hash   string
+	State  string
+	Branch string
+	Title  string
 }
 
 type cascadeStepError struct {
@@ -323,6 +331,7 @@ func (a *App) runGraph() error {
 	}
 
 	cache := map[string]string{}
+	rows := make([]graphRow, 0, len(order))
 	for _, branch := range order {
 		hash, err := refHash(root, branch, cache)
 		if err != nil {
@@ -336,8 +345,56 @@ func (a *App) runGraph() error {
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(a.Stdout, "%s [%s] %s %s\n", shortHash(hash), state, branch, title)
-		if err != nil {
+		rows = append(rows, graphRow{
+			Hash:   shortHash(hash),
+			State:  string(state),
+			Branch: branch,
+			Title:  title,
+		})
+	}
+
+	return writeGraphTable(a.Stdout, rows)
+}
+
+func writeGraphTable(w io.Writer, rows []graphRow) error {
+	headers := []string{"Hash", "State", "Branch", "Title"}
+	widths := []int{
+		runeLen(headers[0]),
+		runeLen(headers[1]),
+		runeLen(headers[2]),
+		runeLen(headers[3]),
+	}
+	for _, row := range rows {
+		widths[0] = max(widths[0], runeLen(row.Hash))
+		widths[1] = max(widths[1], runeLen(row.State))
+		widths[2] = max(widths[2], runeLen(row.Branch))
+		widths[3] = max(widths[3], runeLen(row.Title))
+	}
+
+	line := func(cols ...string) string {
+		parts := make([]string, len(cols))
+		for i, col := range cols {
+			parts[i] = padRight(col, widths[i])
+		}
+		return strings.Join(parts, "  ")
+	}
+
+	separator := func() string {
+		parts := make([]string, len(widths))
+		for i, width := range widths {
+			parts[i] = strings.Repeat("-", width)
+		}
+		return strings.Join(parts, "  ")
+	}
+
+	if _, err := fmt.Fprintln(w, line(headers...)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, separator()); err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if _, err := fmt.Fprintln(w, line(row.Hash, row.State, row.Branch, row.Title)); err != nil {
 			return err
 		}
 	}
@@ -567,6 +624,25 @@ func shortHash(hash string) string {
 		return hash
 	}
 	return hash[:7]
+}
+
+func runeLen(s string) int {
+	return utf8.RuneCountInString(s)
+}
+
+func padRight(s string, width int) string {
+	missing := width - runeLen(s)
+	if missing <= 0 {
+		return s
+	}
+	return s + strings.Repeat(" ", missing)
+}
+
+func max(a, b int) int {
+	if b > a {
+		return b
+	}
+	return a
 }
 
 func rebaseBranch(root, branch, targetRef, ontoHash, upstreamRef string, mergeAware bool) error {

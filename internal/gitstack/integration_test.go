@@ -205,6 +205,104 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 	}
 }
 
+func TestGraphCommandFormatsTable(t *testing.T) {
+	repo := t.TempDir()
+	mustGit(t, repo, "init", "-b", "master")
+	mustGit(t, repo, "config", "user.name", "test")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+
+	writeFile(t, filepath.Join(repo, "root.txt"), "root\n")
+	mustGit(t, repo, "add", "root.txt")
+	mustGit(t, repo, "commit", "-m", "root commit")
+	masterHash := gitRevParse(t, repo, "master")
+
+	mustGit(t, repo, "checkout", "-b", "branch-one")
+	writeFile(t, filepath.Join(repo, "one.txt"), "one\n")
+	mustGit(t, repo, "add", "one.txt")
+	mustGit(t, repo, "commit", "-m", "branch one")
+	branchOneHash := gitRevParse(t, repo, "branch-one")
+
+	mustGit(t, repo, "checkout", "-b", "branch-two")
+	writeFile(t, filepath.Join(repo, "two.txt"), "two\n")
+	mustGit(t, repo, "add", "two.txt")
+	mustGit(t, repo, "commit", "-m", "branch two")
+	branchTwoHash := gitRevParse(t, repo, "branch-two")
+
+	writeFile(t, filepath.Join(repo, ConfigFilename), strings.Join([]string{
+		"master=",
+		"branch-one=master",
+		"branch-two=branch-one",
+		"",
+	}, "\n"))
+
+	app := &App{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	mustGit(t, repo, "checkout", "master")
+
+	if err := app.Execute([]string{"graph"}); err != nil {
+		t.Fatalf("graph failed: %v", err)
+	}
+
+	raw := app.Stdout.(*bytes.Buffer).String()
+	lines := strings.Split(strings.TrimRight(raw, "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 lines, got %d:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+
+	header := lines[0]
+	separator := lines[1]
+	if !strings.Contains(header, "Hash") || !strings.Contains(header, "State") || !strings.Contains(header, "Branch") || !strings.Contains(header, "Title") {
+		t.Fatalf("header missing columns:\n%s", header)
+	}
+	if len(separator) != len(header) {
+		t.Fatalf("separator length mismatch: header=%d separator=%d", len(header), len(separator))
+	}
+	for _, line := range lines[2:] {
+		if len(line) != len(header) {
+			t.Fatalf("row length mismatch: want %d got %d\n%s", len(header), len(line), line)
+		}
+	}
+
+	hashCol := strings.Index(header, "Hash")
+	stateCol := strings.Index(header, "State")
+	branchCol := strings.Index(header, "Branch")
+	titleCol := strings.Index(header, "Title")
+	for _, want := range []string{masterHash[:7], branchOneHash[:7], branchTwoHash[:7]} {
+		if !strings.Contains(app.Stdout.(*bytes.Buffer).String(), want) {
+			t.Fatalf("output missing hash %s:\n%s", want, app.Stdout.(*bytes.Buffer).String())
+		}
+	}
+	for _, row := range []struct {
+		line  string
+		hash  string
+		state string
+		branch string
+		title string
+	}{
+		{lines[2], masterHash[:7], "Unsync", "master", "root commit"},
+		{lines[3], branchOneHash[:7], "Sync", "branch-one", "branch one"},
+		{lines[4], branchTwoHash[:7], "Sync", "branch-two", "branch two"},
+	} {
+		if strings.Index(row.line, row.hash) != hashCol {
+			t.Fatalf("hash column not aligned for %q:\n%s", row.branch, row.line)
+		}
+		if strings.Index(row.line, row.state) != stateCol {
+			t.Fatalf("state column not aligned for %q:\n%s", row.branch, row.line)
+		}
+		if strings.Index(row.line, row.branch) != branchCol {
+			t.Fatalf("branch column not aligned for %q:\n%s", row.branch, row.line)
+		}
+		if strings.Index(row.line, row.title) != titleCol {
+			t.Fatalf("title column not aligned for %q:\n%s", row.branch, row.line)
+		}
+	}
+}
+
 func TestCompletionCommand(t *testing.T) {
 	var stdout bytes.Buffer
 	app := &App{Stdout: &stdout, Stderr: &bytes.Buffer{}}
