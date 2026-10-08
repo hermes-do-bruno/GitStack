@@ -839,9 +839,9 @@ func chartColor(chart string) string {
 
 func rebasePlanAction(targetRef, upstreamHash, branch string, mergeAware bool) string {
 	if mergeAware {
-		return fmt.Sprintf("git rebase --rebase-merges --onto %s %s %s", targetRef, shortHash(upstreamHash), branch)
+		return fmt.Sprintf("git rebase --rebase-merges %s %s --onto %s", shortHash(upstreamHash), branch, targetRef)
 	}
-	return fmt.Sprintf("git rebase --onto %s %s %s", targetRef, shortHash(upstreamHash), branch)
+	return fmt.Sprintf("git rebase %s %s --onto %s", shortHash(upstreamHash), branch, targetRef)
 }
 
 func rebaseBranch(root, branch, targetRef, ontoHash, upstreamRef string, mergeAware bool) error {

@@ -281,7 +281,7 @@ func TestCascadePlanShowsThreeRefRebase(t *testing.T) {
 	}
 
 	output := app.Stdout.(*bytes.Buffer).String()
-	want := "git rebase --onto master " + masterAfter[:7] + " branch1"
+	want := "git rebase " + masterAfter[:7] + " branch1 --onto master"
 	if !strings.Contains(output, want) {
 		t.Fatalf("dry-run output missing three-ref rebase command %q:\n%s", want, output)
 	}
