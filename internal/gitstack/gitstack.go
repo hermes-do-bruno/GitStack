@@ -613,15 +613,11 @@ func (a *App) runCascade(args []string) error {
 			continue
 		}
 		targetRef := parents[0]
-		targetHash, err := refHash(root, targetRef, currentHashes)
-		if err != nil {
-			return err
-		}
 		upstreamHash, ok := original[targetRef]
 		if !ok {
 			return cliErrorf("missing original hash for parent %q", targetRef)
 		}
-		plans = append(plans, branchPlan{Branch: branch, Hash: branchHash, State: state, Action: fmt.Sprintf("rebase onto %s", shortHash(targetHash)), TargetRef: targetRef, UpstreamHash: upstreamHash})
+		plans = append(plans, branchPlan{Branch: branch, Hash: branchHash, State: state, Action: rebasePlanAction(targetRef, upstreamHash, branch, len(parents) > 1), TargetRef: targetRef, UpstreamHash: upstreamHash})
 	}
 
 	for _, plan := range plans {
@@ -839,6 +835,13 @@ func chartColor(chart string) string {
 		return ansiDim
 	}
 	return ""
+}
+
+func rebasePlanAction(targetRef, upstreamHash, branch string, mergeAware bool) string {
+	if mergeAware {
+		return fmt.Sprintf("git rebase --rebase-merges --onto %s %s %s", targetRef, shortHash(upstreamHash), branch)
+	}
+	return fmt.Sprintf("git rebase --onto %s %s %s", targetRef, shortHash(upstreamHash), branch)
 }
 
 func rebaseBranch(root, branch, targetRef, ontoHash, upstreamRef string, mergeAware bool) error {

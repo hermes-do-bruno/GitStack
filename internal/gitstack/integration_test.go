@@ -45,7 +45,8 @@ func TestCascadeApplyRebasesStackedRepo(t *testing.T) {
 	writeFile(t, filepath.Join(repo, "master.txt"), "master-update\n")
 	mustGit(t, repo, "add", "master.txt")
 	mustGit(t, repo, "commit", "-m", "master update")
-	masterBefore := gitRevParse(t, repo, "master")
+
+	masterAfter := gitRevParse(t, repo, "master")
 
 	writeFile(t, filepath.Join(repo, ConfigFilename), strings.Join([]string{
 		"branch1=master",
@@ -61,6 +62,8 @@ func TestCascadeApplyRebasesStackedRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	mustGit(t, repo, "checkout", "branch1")
 
 	if err := app.Execute([]string{"cascade", "--apply"}); err != nil {
 		t.Fatalf("cascade --apply failed: %v", err)
@@ -84,10 +87,83 @@ func TestCascadeApplyRebasesStackedRepo(t *testing.T) {
 		t.Fatalf("branch4 did not change after rebase")
 	}
 
-	assertRefParent(t, repo, "branch1", masterBefore)
+	assertRefParent(t, repo, "branch1", masterAfter)
 	assertRefParent(t, repo, "branch2", branch1After)
 	assertRefParent(t, repo, "branch3", branch1After)
 	assertRefParent(t, repo, "branch4", branch2After)
+}
+
+func TestCascadeApplyRebasesBranchesWithMultipleCommits(t *testing.T) {
+	repo := t.TempDir()
+	mustGit(t, repo, "init", "-b", "master")
+	mustGit(t, repo, "config", "user.name", "test")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+
+	writeFile(t, filepath.Join(repo, "base.txt"), "base\n")
+	mustGit(t, repo, "add", "base.txt")
+	mustGit(t, repo, "commit", "-m", "base")
+
+	mustGit(t, repo, "checkout", "-b", "branch1")
+	writeFile(t, filepath.Join(repo, "branch1.txt"), "branch1-a\n")
+	mustGit(t, repo, "add", "branch1.txt")
+	mustGit(t, repo, "commit", "-m", "branch1 a")
+	writeFile(t, filepath.Join(repo, "branch1.txt"), "branch1-b\n")
+	mustGit(t, repo, "commit", "-am", "branch1 b")
+	branch1Before := gitRevParse(t, repo, "branch1")
+
+	mustGit(t, repo, "checkout", "-b", "branch2")
+	writeFile(t, filepath.Join(repo, "branch2.txt"), "branch2\n")
+	mustGit(t, repo, "add", "branch2.txt")
+	mustGit(t, repo, "commit", "-m", "branch2")
+	branch2Before := gitRevParse(t, repo, "branch2")
+
+	mustGit(t, repo, "checkout", "master")
+	writeFile(t, filepath.Join(repo, "master.txt"), "master-update\n")
+	mustGit(t, repo, "add", "master.txt")
+	mustGit(t, repo, "commit", "-m", "master update")
+
+	masterAfter := gitRevParse(t, repo, "master")
+
+	writeFile(t, filepath.Join(repo, ConfigFilename), strings.Join([]string{
+		"branch1=master",
+		"branch2=branch1",
+		"",
+	}, "\n"))
+
+	app := &App{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	mustGit(t, repo, "checkout", "branch1")
+
+	if err := app.Execute([]string{"cascade", "--apply"}); err != nil {
+		t.Fatalf("cascade --apply failed: %v", err)
+	}
+
+	branch1After := gitRevParse(t, repo, "branch1")
+	branch2After := gitRevParse(t, repo, "branch2")
+
+	if branch1After == branch1Before {
+		t.Fatalf("branch1 did not change after rebase")
+	}
+	if branch2After == branch2Before {
+		t.Fatalf("branch2 did not change after rebase")
+	}
+
+	assertRefParent(t, repo, "branch2", branch1After)
+
+	cmd := exec.Command("git", "rev-list", "--count", masterAfter+"..branch1")
+	cmd.Dir = repo
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-list --count failed: %v\n%s", err, string(out))
+	}
+	if strings.TrimSpace(string(out)) != "2" {
+		t.Fatalf("expected branch1 to keep 2 commits after rebase, got %s", strings.TrimSpace(string(out)))
+	}
 }
 
 func mustGit(t *testing.T, repo string, args ...string) {
@@ -161,6 +237,53 @@ func TestCascadeApplySurfacesRebaseConflicts(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error message missing %q:\n%s", want, msg)
 		}
+	}
+}
+
+func TestCascadePlanShowsThreeRefRebase(t *testing.T) {
+	repo := t.TempDir()
+	mustGit(t, repo, "init", "-b", "master")
+	mustGit(t, repo, "config", "user.name", "test")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+
+	writeFile(t, filepath.Join(repo, "base.txt"), "base\n")
+	mustGit(t, repo, "add", "base.txt")
+	mustGit(t, repo, "commit", "-m", "base")
+
+	mustGit(t, repo, "checkout", "-b", "branch1")
+	writeFile(t, filepath.Join(repo, "branch1.txt"), "branch1\n")
+	mustGit(t, repo, "add", "branch1.txt")
+	mustGit(t, repo, "commit", "-m", "branch1")
+
+	mustGit(t, repo, "checkout", "master")
+	writeFile(t, filepath.Join(repo, "master.txt"), "master-update\n")
+	mustGit(t, repo, "add", "master.txt")
+	mustGit(t, repo, "commit", "-m", "master update")
+
+	masterAfter := gitRevParse(t, repo, "master")
+
+	writeFile(t, filepath.Join(repo, ConfigFilename), strings.Join([]string{
+		"branch1=master",
+		"",
+	}, "\n"))
+
+	app := &App{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	mustGit(t, repo, "checkout", "branch1")
+
+	if err := app.Execute([]string{"cascade"}); err != nil {
+		t.Fatalf("cascade dry-run failed: %v", err)
+	}
+
+	output := app.Stdout.(*bytes.Buffer).String()
+	want := "git rebase --onto master " + masterAfter[:7] + " branch1"
+	if !strings.Contains(output, want) {
+		t.Fatalf("dry-run output missing three-ref rebase command %q:\n%s", want, output)
 	}
 }
 
