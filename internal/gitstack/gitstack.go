@@ -60,6 +60,7 @@ type branchPlan struct {
 }
 
 type graphRow struct {
+	Chart   string
 	Hash    string
 	State   string
 	Branch  string
@@ -361,7 +362,7 @@ func (a *App) runGraph() error {
 
 	children := cfg.childrenMap()
 	roots := graphRoots(cfg, current, order, reachable)
-	return writeGraphTree(a.Stdout, cfg, roots, children, rows, reachable)
+	return writeGraphTable(a.Stdout, cfg, roots, children, rows, reachable)
 }
 
 func graphRoots(cfg *ConfigFile, current string, order []string, reachable map[string]bool) []string {
@@ -388,24 +389,82 @@ func graphRoots(cfg *ConfigFile, current string, order []string, reachable map[s
 	return roots
 }
 
-func writeGraphTree(w io.Writer, cfg *ConfigFile, roots []string, children map[string][]string, rows map[string]graphRow, reachable map[string]bool) error {
+func writeGraphTable(w io.Writer, cfg *ConfigFile, roots []string, children map[string][]string, rows map[string]graphRow, reachable map[string]bool) error {
+	entries := make([]graphRow, 0, len(rows))
+	if err := collectGraphRows(cfg, roots, children, rows, reachable, &entries, "", map[string]bool{}); err != nil {
+		return err
+	}
+
+	headers := []string{"Chart", "Branch", "State", "Hash", "Title", "Parents"}
+	widths := []int{
+		runeLen(headers[0]),
+		runeLen(headers[1]),
+		runeLen(headers[2]),
+		runeLen(headers[3]),
+		runeLen(headers[4]),
+		runeLen(headers[5]),
+	}
+	for _, row := range entries {
+		widths[0] = max(widths[0], runeLen(row.Chart))
+		widths[1] = max(widths[1], runeLen(row.Branch))
+		widths[2] = max(widths[2], runeLen(row.State))
+		widths[3] = max(widths[3], runeLen(row.Hash))
+		widths[4] = max(widths[4], runeLen(row.Title))
+		parents := strings.Join(row.Parents, ", ")
+		if parents == "" {
+			parents = "-"
+		}
+		widths[5] = max(widths[5], runeLen(parents))
+	}
+
+	line := func(cols ...string) string {
+		parts := make([]string, len(cols))
+		for i, col := range cols {
+			parts[i] = padRight(col, widths[i])
+		}
+		return strings.Join(parts, "  ")
+	}
+
+	separator := func() string {
+		parts := make([]string, len(widths))
+		for i, width := range widths {
+			parts[i] = strings.Repeat("-", width)
+		}
+		return strings.Join(parts, "  ")
+	}
+
 	if _, err := fmt.Fprintln(w, "Graph:"); err != nil {
 		return err
 	}
-	for i, root := range roots {
-		if i > 0 {
-			if _, err := fmt.Fprintln(w); err != nil {
-				return err
-			}
+	if _, err := fmt.Fprintln(w, line(headers...)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, separator()); err != nil {
+		return err
+	}
+	for _, row := range entries {
+		parents := strings.Join(row.Parents, ", ")
+		if parents == "" {
+			parents = "-"
 		}
-		if err := writeGraphNode(w, cfg, children, rows, reachable, root, "", true, true, map[string]bool{}); err != nil {
+		if _, err := fmt.Fprintln(w, line(row.Chart, row.Branch, row.State, row.Hash, row.Title, parents)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func writeGraphNode(w io.Writer, cfg *ConfigFile, children map[string][]string, rows map[string]graphRow, reachable map[string]bool, branch, prefix string, isRoot, last bool, path map[string]bool) error {
+func collectGraphRows(cfg *ConfigFile, roots []string, children map[string][]string, rows map[string]graphRow, reachable map[string]bool, out *[]graphRow, prefix string, path map[string]bool) error {
+	for i, root := range roots {
+		childPath := map[string]bool{}
+		if err := collectGraphNode(cfg, children, rows, reachable, out, prefix, root, i == len(roots)-1, true, childPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func collectGraphNode(cfg *ConfigFile, children map[string][]string, rows map[string]graphRow, reachable map[string]bool, out *[]graphRow, prefix, branch string, last, isRoot bool, path map[string]bool) error {
 	if path[branch] {
 		return cliErrorf("cycle detected in %s at %q", ConfigFilename, branch)
 	}
@@ -416,20 +475,16 @@ func writeGraphNode(w io.Writer, cfg *ConfigFile, children map[string][]string, 
 	if !ok {
 		return cliErrorf("branch %q is not declared in %s", branch, ConfigFilename)
 	}
-	label := graphNodeLabel(row)
+	chart := prefix
 	if isRoot {
-		if _, err := fmt.Fprintln(w, label); err != nil {
-			return err
-		}
+		chart = "●"
+	} else if last {
+		chart += "└──"
 	} else {
-		connector := "├──"
-		if last {
-			connector = "└──"
-		}
-		if _, err := fmt.Fprintf(w, "%s%s %s\n", prefix, connector, label); err != nil {
-			return err
-		}
+		chart += "├──"
 	}
+	row.Chart = chart
+	*out = append(*out, row)
 
 	nextPrefix := prefix
 	if !isRoot {
@@ -442,19 +497,11 @@ func writeGraphNode(w io.Writer, cfg *ConfigFile, children map[string][]string, 
 
 	branchChildren := graphChildren(cfg, children, branch, reachable)
 	for i, child := range branchChildren {
-		if err := writeGraphNode(w, cfg, children, rows, reachable, child, nextPrefix, false, i == len(branchChildren)-1, path); err != nil {
+		if err := collectGraphNode(cfg, children, rows, reachable, out, nextPrefix, child, i == len(branchChildren)-1, false, map[string]bool{}); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func graphNodeLabel(row graphRow) string {
-	label := fmt.Sprintf("%s [%s] %s %s", row.Branch, row.State, row.Hash, row.Title)
-	if len(row.Parents) > 1 {
-		label += " (parents: " + strings.Join(row.Parents, ", ") + ")"
-	}
-	return label
 }
 
 func graphChildren(cfg *ConfigFile, children map[string][]string, branch string, reachable map[string]bool) []string {
@@ -699,6 +746,25 @@ func shortHash(hash string) string {
 		return hash
 	}
 	return hash[:7]
+}
+
+func runeLen(s string) int {
+	return len([]rune(s))
+}
+
+func padRight(s string, width int) string {
+	missing := width - runeLen(s)
+	if missing <= 0 {
+		return s
+	}
+	return s + strings.Repeat(" ", missing)
+}
+
+func max(a, b int) int {
+	if b > a {
+		return b
+	}
+	return a
 }
 
 func rebaseBranch(root, branch, targetRef, ontoHash, upstreamRef string, mergeAware bool) error {

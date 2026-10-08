@@ -205,7 +205,7 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 	}
 }
 
-func TestGraphCommandRendersTree(t *testing.T) {
+func TestGraphCommandPresentsMixedLayout(t *testing.T) {
 	repo := t.TempDir()
 	mustGit(t, repo, "init", "-b", "master")
 	mustGit(t, repo, "config", "user.name", "test")
@@ -262,29 +262,74 @@ func TestGraphCommandRendersTree(t *testing.T) {
 
 	raw := app.Stdout.(*bytes.Buffer).String()
 	lines := strings.Split(strings.TrimRight(raw, "\n"), "\n")
-	if len(lines) != 6 {
-		t.Fatalf("expected 6 lines, got %d:\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 8 {
+		t.Fatalf("expected 8 lines, got %d:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
 	if lines[0] != "Graph:" {
 		t.Fatalf("missing graph title: %q", lines[0])
 	}
-	if !strings.HasPrefix(lines[1], "master [Unsync] "+masterHash[:7]+" ") {
-		t.Fatalf("unexpected root line:\n%s", lines[1])
+	header := lines[1]
+	if !strings.Contains(header, "Chart") || !strings.Contains(header, "Branch") || !strings.Contains(header, "State") || !strings.Contains(header, "Hash") || !strings.Contains(header, "Title") || !strings.Contains(header, "Parents") {
+		t.Fatalf("header missing columns:\n%s", header)
 	}
-	if !strings.HasPrefix(lines[2], "└── branch1 [Sync] "+branch1Hash[:7]+" ") {
-		t.Fatalf("unexpected branch1 line:\n%s", lines[2])
+	branchCol := strings.Index(header, "Branch")
+	stateCol := strings.Index(header, "State")
+	hashCol := strings.Index(header, "Hash")
+	titleCol := strings.Index(header, "Title")
+	parentsCol := strings.Index(header, "Parents")
+	runeIndex := func(s, sub string) int {
+		byteIndex := strings.Index(s, sub)
+		if byteIndex < 0 {
+			return -1
+		}
+		return len([]rune(s[:byteIndex]))
 	}
-	if !strings.HasPrefix(lines[3], "    ├── branch2 [Sync] "+branch2Hash[:7]+" ") {
-		t.Fatalf("unexpected branch2 line:\n%s", lines[3])
+	if lines[2] == "" {
+		t.Fatal("missing separator")
 	}
-	if !strings.Contains(lines[4], "branch4 [Partial-sync] "+branch4Hash[:7]+" merge branch3 into branch4") {
-		t.Fatalf("unexpected branch4 line:\n%s", lines[4])
+	if len([]rune(lines[2])) != len([]rune(header)) {
+		t.Fatalf("separator length mismatch: header=%d separator=%d", len([]rune(header)), len([]rune(lines[2])))
 	}
-	if !strings.Contains(lines[4], "(parents: branch2, branch3)") {
-		t.Fatalf("branch4 line missing parent annotation:\n%s", lines[4])
+	for _, line := range lines[3:] {
+		if len([]rune(line)) != len([]rune(header)) {
+			t.Fatalf("row length mismatch: want %d got %d\n%s", len([]rune(header)), len([]rune(line)), line)
+		}
 	}
-	if !strings.HasPrefix(lines[5], "    └── branch3 [Sync] "+branch3Hash[:7]+" ") {
-		t.Fatalf("unexpected branch3 line:\n%s", lines[5])
+
+	rows := []struct {
+		line    string
+		chart   string
+		branch  string
+		state   string
+		hash    string
+		title   string
+		parents string
+	}{
+		{lines[3], "●", "master", "Unsync", masterHash[:7], "root commit", "-"},
+		{lines[4], "└──", "branch1", "Sync", branch1Hash[:7], "branch one", "master"},
+		{lines[5], "    ├──", "branch2", "Sync", branch2Hash[:7], "branch two", "branch1"},
+		{lines[6], "    │   └──", "branch4", "Partial-sync", branch4Hash[:7], "merge branch3 into branch4", "branch2, branch3"},
+		{lines[7], "    └──", "branch3", "Sync", branch3Hash[:7], "branch three", "branch1"},
+	}
+	for _, row := range rows {
+		if !strings.HasPrefix(row.line, row.chart) {
+			t.Fatalf("chart column mismatch for %q:\n%s", row.branch, row.line)
+		}
+		if runeIndex(row.line, row.branch) != branchCol {
+			t.Fatalf("branch column mismatch for %q:\n%s", row.branch, row.line)
+		}
+		if runeIndex(row.line, row.state) != stateCol {
+			t.Fatalf("state column mismatch for %q:\n%s", row.branch, row.line)
+		}
+		if runeIndex(row.line, row.hash) != hashCol {
+			t.Fatalf("hash column mismatch for %q:\n%s", row.branch, row.line)
+		}
+		if runeIndex(row.line, row.title) != titleCol {
+			t.Fatalf("title column mismatch for %q:\n%s", row.branch, row.line)
+		}
+		if runeIndex(row.line, row.parents) != parentsCol {
+			t.Fatalf("parents column mismatch for %q:\n%s", row.branch, row.line)
+		}
 	}
 }
 
