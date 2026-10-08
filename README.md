@@ -10,39 +10,24 @@ Git Stack is a Go CLI for stacked branches. It reads `.git-stack`, shows branch 
 
 ## Install
 
-Download the release archive for your OS and architecture from GitHub Releases, then install the binary.
-
-### macOS
+Use the install script to detect the current OS and architecture automatically.
 
 ```bash
-VERSION=v0.1.0-alpha.0
-ARCH=$(uname -m)
-case "$ARCH" in
-  x86_64) ARCH=x64 ;;
-  arm64) ARCH=arm64 ;;
-  *) echo "unsupported architecture: $ARCH"; exit 1 ;;
-esac
-curl -L -o /tmp/git-stack.tar.gz \
-  "https://github.com/hermes-do-bruno/GitStack/releases/download/${VERSION}/git-stack-macos-${ARCH}.tar.gz"
-tar -xzf /tmp/git-stack.tar.gz -C /tmp
-sudo install -m 755 /tmp/git-stack /usr/local/bin/git-stack
+VERSION=v0.1.0-alpha.2 ./scripts/install.sh
 ```
 
-### Linux
+Or pass the version as an argument:
 
 ```bash
-VERSION=v0.1.0-alpha.0
-ARCH=$(uname -m)
-case "$ARCH" in
-  x86_64) ARCH=x64 ;;
-  aarch64|arm64) ARCH=arm64 ;;
-  *) echo "unsupported architecture: $ARCH"; exit 1 ;;
-esac
-curl -L -o /tmp/git-stack.tar.gz \
-  "https://github.com/hermes-do-bruno/GitStack/releases/download/${VERSION}/git-stack-linux-${ARCH}.tar.gz"
-tar -xzf /tmp/git-stack.tar.gz -C /tmp
-sudo install -m 755 /tmp/git-stack /usr/local/bin/git-stack
+./scripts/install.sh v0.1.0-alpha.2
 ```
+
+The script supports:
+
+- Linux x64
+- Linux arm64
+- macOS x64
+- macOS arm64
 
 To verify the install:
 
