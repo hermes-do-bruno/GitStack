@@ -1,0 +1,4 @@
+main=
+left=main
+right=main
+integration=left,right

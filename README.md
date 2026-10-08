@@ -22,7 +22,7 @@ If you want a specific release, download the installer script and pass the versi
 ```bash
 curl -fsSL -o /tmp/git-stack-install.sh \
   https://raw.githubusercontent.com/hermes-do-bruno/GitStack/main/scripts/install.sh
-VERSION=v0.1.0-alpha.2 sh /tmp/git-stack-install.sh
+VERSION=v0.2.0-beta sh /tmp/git-stack-install.sh
 ```
 
 The script also accepts `latest` to force the newest GitHub release tag.

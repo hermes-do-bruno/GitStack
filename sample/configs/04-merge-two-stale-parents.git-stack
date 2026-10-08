@@ -1,0 +1,3 @@
+main=
+left=main
+right=main,left
