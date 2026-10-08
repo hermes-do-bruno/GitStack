@@ -11,6 +11,7 @@ Git Stack is a Go CLI for stacked branches. It reads `.git-stack`, shows branch 
 ## Install
 
 Use the install script to detect the current OS and architecture automatically.
+It also installs bash and zsh completions.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hermes-do-bruno/GitStack/main/scripts/install.sh | sh
@@ -109,4 +110,5 @@ Each archive includes the `git-stack` binary and a SHA-256 checksum.
 - `git-stack parent [name]` — set the current branch parent(s) in `.git-stack`
 - `git-stack graph` — show the branch graph and sync state
 - `git-stack cascade [--apply]` — plan or apply the cascade from the current branch
+- `git-stack completion <bash|zsh>` — print shell completion scripts
 - `git-stack version` — show the CLI version

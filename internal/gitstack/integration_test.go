@@ -178,6 +178,7 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 		"git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack",
 		"git-stack graph                          Show the branch graph and sync state",
 		"git-stack cascade [--apply]              Plan or apply the cascade from the current branch",
+		"git-stack completion <bash|zsh>          Print shell completion script",
 		"git-stack version                        Show the CLI version",
 	} {
 		if !strings.Contains(output, want) {
@@ -200,6 +201,32 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 		output := stdout.String() + stderr.String()
 		if !strings.Contains(output, want) {
 			t.Fatalf("%s help missing %q:\n%s", command, want, output)
+		}
+	}
+}
+
+func TestCompletionCommand(t *testing.T) {
+	var stdout bytes.Buffer
+	app := &App{Stdout: &stdout, Stderr: &bytes.Buffer{}}
+
+	if err := app.Execute([]string{"completion", "bash"}); err != nil {
+		t.Fatalf("Execute(completion bash) failed: %v", err)
+	}
+	bash := stdout.String()
+	for _, want := range []string{"complete -F _git_stack_completion git-stack", "compgen -W \"parent graph cascade completion version help --help -h --version -v\""} {
+		if !strings.Contains(bash, want) {
+			t.Fatalf("bash completion missing %q:\n%s", want, bash)
+		}
+	}
+
+	stdout.Reset()
+	if err := app.Execute([]string{"completion", "zsh"}); err != nil {
+		t.Fatalf("Execute(completion zsh) failed: %v", err)
+	}
+	zsh := stdout.String()
+	for _, want := range []string{"#compdef git-stack", "compdef _git_stack_completion git-stack"} {
+		if !strings.Contains(zsh, want) {
+			t.Fatalf("zsh completion missing %q:\n%s", want, zsh)
 		}
 	}
 }

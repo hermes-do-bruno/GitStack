@@ -105,6 +105,11 @@ func (a *App) Execute(args []string) error {
 			return a.cascadeHelp()
 		}
 		return a.runCascade(args[1:])
+	case "completion":
+		if hasHelpFlag(args[1:]) {
+			return a.completionHelp()
+		}
+		return a.runCompletion(args[1:])
 	case "version", "--version", "-v":
 		if hasHelpFlag(args[1:]) {
 			return a.versionHelp()
@@ -147,6 +152,11 @@ func (a *App) cascadeHelp() error {
 	return err
 }
 
+func (a *App) completionHelp() error {
+	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack completion <bash|zsh>")
+	return err
+}
+
 func helpText() string {
 	return strings.TrimSpace(`git-stack - stacked-branch workflow tool
 
@@ -157,6 +167,7 @@ Commands:
   git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack
   git-stack graph                          Show the branch graph and sync state
   git-stack cascade [--apply]              Plan or apply the cascade from the current branch
+  git-stack completion <bash|zsh>          Print shell completion script
   git-stack version                        Show the CLI version
   git-stack help                           Show this help
   git-stack --help                         Show this help
@@ -166,6 +177,85 @@ Examples:
   git-stack parent master
   git-stack graph
   git-stack cascade --apply`)
+}
+
+func bashCompletionScript() string {
+	return strings.TrimSpace(`_git_stack_completion() {
+  local cur refs
+  COMPREPLY=()
+  cur="${COMP_WORDS[COMP_CWORD]}"
+
+  if [ "${COMP_CWORD}" -eq 1 ]; then
+    COMPREPLY=( $(compgen -W "parent graph cascade completion version help --help -h --version -v" -- "$cur") )
+    return 0
+  fi
+
+  case "${COMP_WORDS[1]}" in
+    parent)
+      refs="$(git for-each-ref --format='%(refname:short)' refs/heads refs/remotes 2>/dev/null)"
+      COMPREPLY=( $(compgen -W "$refs --help -h" -- "$cur") )
+      ;;
+    cascade)
+      COMPREPLY=( $(compgen -W "--apply --help -h" -- "$cur") )
+      ;;
+    completion)
+      COMPREPLY=( $(compgen -W "bash zsh --help -h" -- "$cur") )
+      ;;
+    *)
+      COMPREPLY=( $(compgen -W "--help -h" -- "$cur") )
+      ;;
+  esac
+}
+complete -F _git_stack_completion git-stack`)
+}
+
+func zshCompletionScript() string {
+	return strings.TrimSpace(`#compdef git-stack
+
+_git_stack_completion() {
+  local state
+  local -a branches
+  typeset -A opt_args
+
+  _arguments -C \
+    '1:command:(parent graph cascade completion version help)' \
+    '*::arg:->args'
+
+  case "$state" in
+    args)
+      case "$words[2]" in
+        parent)
+          branches=("${(@f)$(git for-each-ref --format='%(refname:short)' refs/heads refs/remotes 2>/dev/null)}")
+          compadd -- $branches
+          ;;
+        cascade)
+          _arguments '--apply[apply the cascade]' '--help[show help]' '-h[show help]'
+          ;;
+        completion)
+          _arguments '1:shell:(bash zsh)'
+          ;;
+      esac
+      ;;
+  esac
+}
+compdef _git_stack_completion git-stack`)
+}
+
+func (a *App) runCompletion(args []string) error {
+	if len(args) != 1 {
+		return cliErrorf("usage: git-stack completion <bash|zsh>")
+	}
+	var script string
+	switch args[0] {
+	case "bash":
+		script = bashCompletionScript()
+	case "zsh":
+		script = zshCompletionScript()
+	default:
+		return cliErrorf("unsupported completion shell %q", args[0])
+	}
+	_, err := fmt.Fprintln(a.Stdout, script)
+	return err
 }
 
 func hasHelpFlag(args []string) bool {

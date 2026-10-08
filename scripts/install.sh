@@ -91,4 +91,13 @@ install_dir="$prefix/bin"
 mkdir -p "$install_dir"
 install -m 755 "$tmpdir/git-stack" "$install_dir/git-stack"
 
+bash_completion_dir="$prefix/share/bash-completion/completions"
+bash_legacy_dir="$prefix/etc/bash_completion.d"
+zsh_completion_dir="$prefix/share/zsh/site-functions"
+mkdir -p "$bash_completion_dir" "$bash_legacy_dir" "$zsh_completion_dir"
+"$tmpdir/git-stack" completion bash > "$bash_completion_dir/git-stack"
+cp "$bash_completion_dir/git-stack" "$bash_legacy_dir/git-stack"
+"$tmpdir/git-stack" completion zsh > "$zsh_completion_dir/_git-stack"
+
 echo "installed git-stack to $install_dir/git-stack"
+echo "installed completions to $bash_completion_dir/git-stack, $bash_legacy_dir/git-stack, and $zsh_completion_dir/_git-stack"
