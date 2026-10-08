@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo="hermes-do-bruno/GitStack"
+
 usage() {
   cat <<'EOF'
 Usage: install.sh [VERSION]
 
 Install the Git Stack release for the current OS and architecture.
+If VERSION is omitted, the script fetches the latest GitHub release tag.
 
 Environment variables:
   VERSION   Release tag to install, for example v0.1.0-alpha.2
+            Use "latest" to fetch the newest GitHub release tag.
   PREFIX    Install prefix (default: /usr/local)
 
 Examples:
+  ./scripts/install.sh
   VERSION=v0.1.0-alpha.2 ./scripts/install.sh
   ./scripts/install.sh v0.1.0-alpha.2
 EOF
@@ -22,10 +27,19 @@ if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
   exit 0
 fi
 
+latest_version() {
+  curl -fsSL \
+    -H 'Accept: application/vnd.github+json' \
+    -H 'User-Agent: GitStack installer' \
+    "https://api.github.com/repos/${repo}/releases/latest" \
+    | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"' \
+    | head -n1 \
+    | cut -d'"' -f4
+}
+
 version="${VERSION:-${1:-}}"
-if [[ -z "$version" ]]; then
-  usage >&2
-  exit 1
+if [[ -z "$version" || "$version" == "latest" ]]; then
+  version="$(latest_version)"
 fi
 
 os="$(uname -s)"
@@ -50,7 +64,7 @@ case "$arch" in
 esac
 
 asset="git-stack-${platform}-${arch}.tar.gz"
-url="https://github.com/hermes-do-bruno/GitStack/releases/download/${version}/${asset}"
+url="https://github.com/${repo}/releases/download/${version}/${asset}"
 
 if [[ ${PRINT_URL:-0} == 1 ]]; then
   printf '%s\n' "$url"
