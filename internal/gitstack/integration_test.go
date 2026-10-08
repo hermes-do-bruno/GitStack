@@ -333,6 +333,52 @@ func TestGraphCommandPresentsMixedLayout(t *testing.T) {
 	}
 }
 
+func TestGraphCommandUsesColorsWhenForced(t *testing.T) {
+	repo := t.TempDir()
+	mustGit(t, repo, "init", "-b", "master")
+	mustGit(t, repo, "config", "user.name", "test")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+
+	writeFile(t, filepath.Join(repo, "root.txt"), "root\n")
+	mustGit(t, repo, "add", "root.txt")
+	mustGit(t, repo, "commit", "-m", "root commit")
+
+	mustGit(t, repo, "checkout", "-b", "branch1")
+	writeFile(t, filepath.Join(repo, "branch1.txt"), "branch1\n")
+	mustGit(t, repo, "add", "branch1.txt")
+	mustGit(t, repo, "commit", "-m", "branch one")
+
+	writeFile(t, filepath.Join(repo, ConfigFilename), strings.Join([]string{
+		"master=",
+		"branch1=master",
+		"",
+	}, "\n"))
+
+	app := &App{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	t.Setenv("FORCE_COLOR", "1")
+
+	mustGit(t, repo, "checkout", "master")
+
+	if err := app.Execute([]string{"graph"}); err != nil {
+		t.Fatalf("graph failed: %v", err)
+	}
+
+	output := app.Stdout.(*bytes.Buffer).String()
+	if !strings.Contains(output, "\x1b[") {
+		t.Fatalf("expected ANSI colors in graph output:\n%s", output)
+	}
+	for _, want := range []string{"Graph:", "Chart", "Branch", "State", "Hash", "Title", "Parents", "master", "branch1"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("colored output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestCompletionCommand(t *testing.T) {
 	var stdout bytes.Buffer
 	app := &App{Stdout: &stdout, Stderr: &bytes.Buffer{}}

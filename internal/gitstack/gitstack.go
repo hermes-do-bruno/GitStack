@@ -68,6 +68,17 @@ type graphRow struct {
 	Parents []string
 }
 
+const (
+	ansiReset  = "\x1b[0m"
+	ansiBold   = "\x1b[1m"
+	ansiDim    = "\x1b[2m"
+	ansiRed    = "\x1b[31m"
+	ansiGreen  = "\x1b[32m"
+	ansiYellow = "\x1b[33m"
+	ansiBlue   = "\x1b[34m"
+	ansiCyan   = "\x1b[36m"
+)
+
 type cascadeStepError struct {
 	kind   string
 	branch string
@@ -362,7 +373,7 @@ func (a *App) runGraph() error {
 
 	children := cfg.childrenMap()
 	roots := graphRoots(cfg, current, order, reachable)
-	return writeGraphTable(a.Stdout, cfg, roots, children, rows, reachable)
+	return writeGraphTable(a.Stdout, cfg, roots, children, rows, reachable, colorEnabled(a.Stdout))
 }
 
 func graphRoots(cfg *ConfigFile, current string, order []string, reachable map[string]bool) []string {
@@ -389,7 +400,7 @@ func graphRoots(cfg *ConfigFile, current string, order []string, reachable map[s
 	return roots
 }
 
-func writeGraphTable(w io.Writer, cfg *ConfigFile, roots []string, children map[string][]string, rows map[string]graphRow, reachable map[string]bool) error {
+func writeGraphTable(w io.Writer, cfg *ConfigFile, roots []string, children map[string][]string, rows map[string]graphRow, reachable map[string]bool, colorizeOutput bool) error {
 	entries := make([]graphRow, 0, len(rows))
 	if err := collectGraphRows(cfg, roots, children, rows, reachable, &entries, "", map[string]bool{}); err != nil {
 		return err
@@ -417,12 +428,12 @@ func writeGraphTable(w io.Writer, cfg *ConfigFile, roots []string, children map[
 		widths[5] = max(widths[5], runeLen(parents))
 	}
 
-	line := func(cols ...string) string {
-		parts := make([]string, len(cols))
-		for i, col := range cols {
-			parts[i] = padRight(col, widths[i])
+	render := func(text string, width int, code string) string {
+		text = padRight(text, width)
+		if colorizeOutput {
+			return colorize(text, code, true)
 		}
-		return strings.Join(parts, "  ")
+		return text
 	}
 
 	separator := func() string {
@@ -436,10 +447,18 @@ func writeGraphTable(w io.Writer, cfg *ConfigFile, roots []string, children map[
 	if _, err := fmt.Fprintln(w, "Graph:"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(w, line(headers...)); err != nil {
+	headerCells := make([]string, len(headers))
+	for i, header := range headers {
+		headerCells[i] = render(header, widths[i], ansiBold)
+	}
+	if _, err := fmt.Fprintln(w, strings.Join(headerCells, "  ")); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(w, separator()); err != nil {
+	separatorLine := separator()
+	if colorizeOutput {
+		separatorLine = colorize(separatorLine, ansiDim, true)
+	}
+	if _, err := fmt.Fprintln(w, separatorLine); err != nil {
 		return err
 	}
 	for _, row := range entries {
@@ -447,7 +466,15 @@ func writeGraphTable(w io.Writer, cfg *ConfigFile, roots []string, children map[
 		if parents == "" {
 			parents = "-"
 		}
-		if _, err := fmt.Fprintln(w, line(row.Chart, row.Branch, row.State, row.Hash, row.Title, parents)); err != nil {
+		cells := []string{
+			render(row.Chart, widths[0], chartColor(row.Chart)),
+			render(row.Branch, widths[1], ansiBold),
+			render(row.State, widths[2], stateColor(BranchState(row.State))),
+			render(row.Hash, widths[3], ansiDim),
+			render(row.Title, widths[4], ""),
+			render(parents, widths[5], ansiDim),
+		}
+		if _, err := fmt.Fprintln(w, strings.Join(cells, "  ")); err != nil {
 			return err
 		}
 	}
@@ -765,6 +792,53 @@ func max(a, b int) int {
 		return b
 	}
 	return a
+}
+
+func colorEnabled(w io.Writer) bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	if os.Getenv("FORCE_COLOR") != "" || os.Getenv("CLICOLOR_FORCE") != "" {
+		return true
+	}
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
+}
+
+func colorize(text, code string, enabled bool) string {
+	if !enabled || code == "" {
+		return text
+	}
+	return code + text + ansiReset
+}
+
+func stateColor(state BranchState) string {
+	switch state {
+	case StateMerged:
+		return ansiGreen
+	case StateSync:
+		return ansiCyan
+	case StatePartialSync:
+		return ansiYellow
+	case StateUnsync:
+		return ansiRed
+	default:
+		return ""
+	}
+}
+
+func chartColor(chart string) string {
+	if chart == "●" {
+		return ansiBlue
+	}
+	if strings.Contains(chart, "├") || strings.Contains(chart, "└") || strings.Contains(chart, "│") {
+		return ansiDim
+	}
+	return ""
 }
 
 func rebaseBranch(root, branch, targetRef, ontoHash, upstreamRef string, mergeAware bool) error {
