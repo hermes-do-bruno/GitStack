@@ -845,7 +845,7 @@ func rebasePlanAction(targetRef, upstreamHash, branch string, mergeAware bool) s
 }
 
 func rebaseBranch(root, branch, targetRef, ontoHash, upstreamRef string, mergeAware bool) error {
-	cmd := exec.Command("git", "rebase", "--rebase-merges", "--onto", ontoHash, upstreamRef, branch)
+	cmd := exec.Command("git", "rebase", "--rebase-merges", upstreamRef, branch, "--onto", ontoHash)
 	cmd.Dir = root
 	output, err := cmd.CombinedOutput()
 	if err == nil {

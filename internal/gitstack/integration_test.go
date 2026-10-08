@@ -287,6 +287,14 @@ func TestCascadePlanShowsThreeRefRebase(t *testing.T) {
 	}
 }
 
+func TestRebasePlanActionUsesOntoLastForMergeAware(t *testing.T) {
+	got := rebasePlanAction("onto", "abcdef1234567890", "branch1", true)
+	want := "git rebase --rebase-merges abcdef1 branch1 --onto onto"
+	if got != want {
+		t.Fatalf("merge-aware plan mismatch: want %q got %q", want, got)
+	}
+}
+
 func TestHelpShowsCommandsAndParameters(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
