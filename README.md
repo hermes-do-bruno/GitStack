@@ -22,7 +22,7 @@ If you want a specific release, download the installer script and pass the versi
 ```bash
 curl -fsSL -o /tmp/git-stack-install.sh \
   https://raw.githubusercontent.com/hermes-do-bruno/GitStack/main/scripts/install.sh
-VERSION=v0.2.0-beta sh /tmp/git-stack-install.sh
+VERSION=v0.2.1-beta sh /tmp/git-stack-install.sh
 ```
 
 The script also accepts `latest` to force the newest GitHub release tag.
@@ -108,7 +108,7 @@ Each archive includes the `git-stack` binary and a SHA-256 checksum.
 
 
 - `git-stack parent [name]` — set the current branch parent(s) in `.git-stack`
-- `git-stack graph` — show the branch graph and sync state
-- `git-stack cascade [--apply]` — plan or apply the cascade from the current branch
+- `git-stack graph [columns]` — show the branch graph and sync state, with optional column filtering
+- `git-stack cascade [--apply|--script]` — plan, print a script, or apply the cascade from the current branch
 - `git-stack completion <bash|zsh>` — print shell completion scripts
 - `git-stack version` — show the CLI version

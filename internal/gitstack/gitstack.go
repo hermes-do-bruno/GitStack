@@ -68,6 +68,24 @@ type graphRow struct {
 	Parents []string
 }
 
+type graphColumnID string
+
+type graphColumn struct {
+	ID     graphColumnID
+	Header string
+	Value  func(graphRow) string
+	Color  func(graphRow) string
+}
+
+const (
+	graphColumnChart   graphColumnID = "chart"
+	graphColumnHash    graphColumnID = "hash"
+	graphColumnState   graphColumnID = "state"
+	graphColumnBranch  graphColumnID = "branch"
+	graphColumnTitle   graphColumnID = "title"
+	graphColumnParents graphColumnID = "parents"
+)
+
 const (
 	ansiReset  = "\x1b[0m"
 	ansiBold   = "\x1b[1m"
@@ -119,7 +137,7 @@ func (a *App) Execute(args []string) error {
 		if hasHelpFlag(args[1:]) {
 			return a.graphHelp()
 		}
-		return a.runGraph()
+		return a.runGraph(args[1:])
 	case "cascade":
 		if hasHelpFlag(args[1:]) {
 			return a.cascadeHelp()
@@ -163,12 +181,12 @@ func (a *App) parentHelp() error {
 }
 
 func (a *App) graphHelp() error {
-	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack graph")
+	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack graph [columns|--columns <list>|--format <list>]")
 	return err
 }
 
 func (a *App) cascadeHelp() error {
-	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack cascade [--apply]")
+	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack cascade [--apply|--script]")
 	return err
 }
 
@@ -185,8 +203,8 @@ Usage:
 
 Commands:
   git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack
-  git-stack graph                          Show the branch graph and sync state
-  git-stack cascade [--apply]              Plan or apply the cascade from the current branch
+  git-stack graph [columns]                Show the branch graph and sync state, with optional column filtering
+  git-stack cascade [--apply|--script]     Plan, print a script, or apply the cascade from the current branch
   git-stack completion <bash|zsh>          Print shell completion script
   git-stack version                        Show the CLI version
   git-stack help                           Show this help
@@ -195,8 +213,8 @@ Commands:
 
 Examples:
   git-stack parent master
-  git-stack graph
-  git-stack cascade --apply`)
+  git-stack graph branch,state
+  git-stack cascade --script`)
 }
 
 func bashCompletionScript() string {
@@ -216,7 +234,10 @@ func bashCompletionScript() string {
       COMPREPLY=( $(compgen -W "$refs --help -h" -- "$cur") )
       ;;
     cascade)
-      COMPREPLY=( $(compgen -W "--apply --help -h" -- "$cur") )
+      COMPREPLY=( $(compgen -W "--apply --script --help -h" -- "$cur") )
+      ;;
+    graph)
+      COMPREPLY=( $(compgen -W "--columns --format --help -h" -- "$cur") )
       ;;
     completion)
       COMPREPLY=( $(compgen -W "bash zsh --help -h" -- "$cur") )
@@ -249,7 +270,10 @@ _git_stack_completion() {
           compadd -- $branches
           ;;
         cascade)
-          _arguments '--apply[apply the cascade]' '--help[show help]' '-h[show help]'
+          _arguments '--apply[apply the cascade]' '--script[print a shell script]' '--help[show help]' '-h[show help]'
+          ;;
+        graph)
+          _arguments '--columns[filter graph columns]' '--format[filter graph columns]' '--help[show help]' '-h[show help]'
           ;;
         completion)
           _arguments '1:shell:(bash zsh)'
@@ -321,7 +345,12 @@ func (a *App) runParent(args []string) error {
 	return err
 }
 
-func (a *App) runGraph() error {
+func (a *App) runGraph(args []string) error {
+	columns, err := parseGraphColumns(args)
+	if err != nil {
+		return err
+	}
+
 	root, err := repoRoot()
 	if err != nil {
 		return err
@@ -373,7 +402,7 @@ func (a *App) runGraph() error {
 
 	children := cfg.childrenMap()
 	roots := graphRoots(cfg, current, order, reachable)
-	return writeGraphTable(a.Stdout, cfg, roots, children, rows, reachable, colorEnabled(a.Stdout))
+	return writeGraphTable(a.Stdout, cfg, roots, children, rows, reachable, columns, colorEnabled(a.Stdout))
 }
 
 func graphRoots(cfg *ConfigFile, current string, order []string, reachable map[string]bool) []string {
@@ -400,32 +429,198 @@ func graphRoots(cfg *ConfigFile, current string, order []string, reachable map[s
 	return roots
 }
 
-func writeGraphTable(w io.Writer, cfg *ConfigFile, roots []string, children map[string][]string, rows map[string]graphRow, reachable map[string]bool, colorizeOutput bool) error {
+func defaultGraphColumns() []graphColumn {
+	return []graphColumn{
+		{
+			ID:     graphColumnChart,
+			Header: "Chart",
+			Value:  func(row graphRow) string { return row.Chart },
+			Color:  func(row graphRow) string { return chartColor(row.Chart) },
+		},
+		{
+			ID:     graphColumnBranch,
+			Header: "Branch",
+			Value:  func(row graphRow) string { return row.Branch },
+			Color:  func(graphRow) string { return ansiBold },
+		},
+		{
+			ID:     graphColumnState,
+			Header: "State",
+			Value:  func(row graphRow) string { return row.State },
+			Color:  func(row graphRow) string { return stateColor(BranchState(row.State)) },
+		},
+		{
+			ID:     graphColumnHash,
+			Header: "Hash",
+			Value:  func(row graphRow) string { return row.Hash },
+			Color:  func(graphRow) string { return ansiDim },
+		},
+		{
+			ID:     graphColumnTitle,
+			Header: "Title",
+			Value:  func(row graphRow) string { return row.Title },
+			Color:  func(graphRow) string { return "" },
+		},
+		{
+			ID:     graphColumnParents,
+			Header: "Parents",
+			Value: func(row graphRow) string {
+				parents := strings.Join(row.Parents, ", ")
+				if parents == "" {
+					return "-"
+				}
+				return parents
+			},
+			Color: func(graphRow) string { return ansiDim },
+		},
+	}
+}
+
+func parseGraphColumns(args []string) ([]graphColumn, error) {
+	if len(args) == 0 {
+		return defaultGraphColumns(), nil
+	}
+
+	var spec string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--columns" || arg == "--format" || arg == "-c":
+			if spec != "" {
+				return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+			}
+			if i+1 >= len(args) {
+				return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+			}
+			spec = args[i+1]
+			i++
+		case strings.HasPrefix(arg, "--columns="):
+			if spec != "" {
+				return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+			}
+			spec = strings.TrimPrefix(arg, "--columns=")
+		case strings.HasPrefix(arg, "--format="):
+			if spec != "" {
+				return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+			}
+			spec = strings.TrimPrefix(arg, "--format=")
+		case strings.HasPrefix(arg, "-"):
+			return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+		default:
+			if spec != "" {
+				return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+			}
+			spec = arg
+		}
+	}
+
+	if spec == "" {
+		return defaultGraphColumns(), nil
+	}
+	return parseGraphColumnSpec(spec)
+}
+
+func parseGraphColumnSpec(spec string) ([]graphColumn, error) {
+	tokens := strings.FieldsFunc(spec, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '	' || r == '\n'
+	})
+	if len(tokens) == 0 {
+		return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+	}
+
+	if len(tokens) == 1 {
+		switch strings.ToLower(tokens[0]) {
+		case "all", "*", "default":
+			return defaultGraphColumns(), nil
+		}
+	}
+
+	selected := make([]graphColumn, 0, len(tokens))
+	seen := map[graphColumnID]bool{}
+	for _, token := range tokens {
+		column, ok := graphColumnByName(strings.ToLower(strings.TrimSpace(token)))
+		if !ok {
+			return nil, cliErrorf("unknown graph column %q", token)
+		}
+		if seen[column.ID] {
+			continue
+		}
+		seen[column.ID] = true
+		selected = append(selected, column)
+	}
+	if len(selected) == 0 {
+		return nil, cliErrorf("no graph columns selected")
+	}
+	return selected, nil
+}
+
+func graphColumnByName(name string) (graphColumn, bool) {
+	switch name {
+	case "chart":
+		return graphColumn{
+			ID:     graphColumnChart,
+			Header: "Chart",
+			Value:  func(row graphRow) string { return row.Chart },
+			Color:  func(row graphRow) string { return chartColor(row.Chart) },
+		}, true
+	case "branch":
+		return graphColumn{
+			ID:     graphColumnBranch,
+			Header: "Branch",
+			Value:  func(row graphRow) string { return row.Branch },
+			Color:  func(graphRow) string { return ansiBold },
+		}, true
+	case "state":
+		return graphColumn{
+			ID:     graphColumnState,
+			Header: "State",
+			Value:  func(row graphRow) string { return row.State },
+			Color:  func(row graphRow) string { return stateColor(BranchState(row.State)) },
+		}, true
+	case "hash":
+		return graphColumn{
+			ID:     graphColumnHash,
+			Header: "Hash",
+			Value:  func(row graphRow) string { return row.Hash },
+			Color:  func(graphRow) string { return ansiDim },
+		}, true
+	case "title":
+		return graphColumn{
+			ID:     graphColumnTitle,
+			Header: "Title",
+			Value:  func(row graphRow) string { return row.Title },
+			Color:  func(graphRow) string { return "" },
+		}, true
+	case "parents":
+		return graphColumn{
+			ID:     graphColumnParents,
+			Header: "Parents",
+			Value: func(row graphRow) string {
+				parents := strings.Join(row.Parents, ", ")
+				if parents == "" {
+					return "-"
+				}
+				return parents
+			},
+			Color: func(graphRow) string { return ansiDim },
+		}, true
+	default:
+		return graphColumn{}, false
+	}
+}
+
+func writeGraphTable(w io.Writer, cfg *ConfigFile, roots []string, children map[string][]string, rows map[string]graphRow, reachable map[string]bool, columns []graphColumn, colorizeOutput bool) error {
 	entries := make([]graphRow, 0, len(rows))
 	if err := collectGraphRows(cfg, roots, children, rows, reachable, &entries, "", map[string]bool{}); err != nil {
 		return err
 	}
 
-	headers := []string{"Chart", "Branch", "State", "Hash", "Title", "Parents"}
-	widths := []int{
-		runeLen(headers[0]),
-		runeLen(headers[1]),
-		runeLen(headers[2]),
-		runeLen(headers[3]),
-		runeLen(headers[4]),
-		runeLen(headers[5]),
-	}
-	for _, row := range entries {
-		widths[0] = max(widths[0], runeLen(row.Chart))
-		widths[1] = max(widths[1], runeLen(row.Branch))
-		widths[2] = max(widths[2], runeLen(row.State))
-		widths[3] = max(widths[3], runeLen(row.Hash))
-		widths[4] = max(widths[4], runeLen(row.Title))
-		parents := strings.Join(row.Parents, ", ")
-		if parents == "" {
-			parents = "-"
+	widths := make([]int, len(columns))
+	for i, column := range columns {
+		widths[i] = runeLen(column.Header)
+		for _, row := range entries {
+			widths[i] = max(widths[i], runeLen(column.Value(row)))
 		}
-		widths[5] = max(widths[5], runeLen(parents))
 	}
 
 	render := func(text string, width int, code string) string {
@@ -447,9 +642,9 @@ func writeGraphTable(w io.Writer, cfg *ConfigFile, roots []string, children map[
 	if _, err := fmt.Fprintln(w, "Graph:"); err != nil {
 		return err
 	}
-	headerCells := make([]string, len(headers))
-	for i, header := range headers {
-		headerCells[i] = render(header, widths[i], ansiBold)
+	headerCells := make([]string, len(columns))
+	for i, column := range columns {
+		headerCells[i] = render(column.Header, widths[i], ansiBold)
 	}
 	if _, err := fmt.Fprintln(w, strings.Join(headerCells, "  ")); err != nil {
 		return err
@@ -462,17 +657,9 @@ func writeGraphTable(w io.Writer, cfg *ConfigFile, roots []string, children map[
 		return err
 	}
 	for _, row := range entries {
-		parents := strings.Join(row.Parents, ", ")
-		if parents == "" {
-			parents = "-"
-		}
-		cells := []string{
-			render(row.Chart, widths[0], chartColor(row.Chart)),
-			render(row.Branch, widths[1], ansiBold),
-			render(row.State, widths[2], stateColor(BranchState(row.State))),
-			render(row.Hash, widths[3], ansiDim),
-			render(row.Title, widths[4], ""),
-			render(parents, widths[5], ansiDim),
+		cells := make([]string, len(columns))
+		for i, column := range columns {
+			cells[i] = render(column.Value(row), widths[i], column.Color(row))
 		}
 		if _, err := fmt.Fprintln(w, strings.Join(cells, "  ")); err != nil {
 			return err
@@ -552,14 +739,20 @@ func graphChildren(cfg *ConfigFile, children map[string][]string, branch string,
 
 func (a *App) runCascade(args []string) error {
 	apply := false
-	if len(args) > 0 {
-		if args[0] == "--apply" {
+	script := false
+	for len(args) > 0 {
+		switch args[0] {
+		case "--apply":
 			apply = true
-			args = args[1:]
+		case "--script":
+			script = true
+		default:
+			return cliErrorf("usage: git-stack cascade [--apply|--script]")
 		}
+		args = args[1:]
 	}
-	if len(args) > 0 {
-		return cliErrorf("usage: git-stack cascade [--apply]")
+	if apply && script {
+		return cliErrorf("usage: git-stack cascade [--apply|--script]")
 	}
 
 	root, err := repoRoot()
@@ -620,6 +813,10 @@ func (a *App) runCascade(args []string) error {
 		plans = append(plans, branchPlan{Branch: branch, Hash: branchHash, State: state, Action: rebasePlanAction(targetRef, upstreamHash, branch, len(parents) > 1), TargetRef: targetRef, UpstreamHash: upstreamHash})
 	}
 
+	if script {
+		return renderCascadeScript(a.Stdout, plans)
+	}
+
 	for _, plan := range plans {
 		if _, err := fmt.Fprintf(a.Stdout, "%s [%s] %s %s\n", shortHash(plan.Hash), plan.State, plan.Branch, plan.Action); err != nil {
 			return err
@@ -644,6 +841,36 @@ func (a *App) runCascade(args []string) error {
 				return err
 			}
 			currentHashes[plan.Branch] = updated
+		}
+	}
+	return nil
+}
+
+func renderCascadeScript(w io.Writer, plans []branchPlan) error {
+	if _, err := fmt.Fprintln(w, "#!/usr/bin/env sh"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "set -eu"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+	for _, plan := range plans {
+		if _, err := fmt.Fprintf(w, "# %s [%s] %s %s\n", shortHash(plan.Hash), plan.State, plan.Branch, plan.Action); err != nil {
+			return err
+		}
+		if plan.Action == "skip merged" || plan.Action == "skip (no parents)" {
+			if _, err := fmt.Fprintln(w); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := fmt.Fprintln(w, plan.Action); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
 		}
 	}
 	return nil

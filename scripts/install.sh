@@ -11,14 +11,14 @@ Install the Git Stack release for the current OS and architecture.
 If VERSION is omitted, the script fetches the latest GitHub release tag.
 
 Environment variables:
-  VERSION   Release tag to install, for example v0.2.0-beta
+  VERSION   Release tag to install, for example v0.2.1-beta
             Use "latest" to fetch the newest GitHub release tag.
   PREFIX    Install prefix (default: /usr/local)
 
 Examples:
   ./scripts/install.sh
-  VERSION=v0.2.0-beta ./scripts/install.sh
-  ./scripts/install.sh v0.2.0-beta
+  VERSION=v0.2.1-beta ./scripts/install.sh
+  ./scripts/install.sh v0.2.1-beta
 EOF
 }
 

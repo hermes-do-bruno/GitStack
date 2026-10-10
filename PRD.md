@@ -102,8 +102,8 @@ The project should stay explicit and deterministic. The `.git-stack` file define
 Proposed commands:
 
 - `git-stack parent [name]` — create or update the current branch's parent entry in `.git-stack` using the current branch name and one or more comma-separated parent names.
-- `git-stack graph` — show branch states and cascade structure.
-- `git-stack cascade` — dry-run the cascade starting from the current branch.
+- `git-stack graph [columns]` — show branch states and cascade structure, with optional column filtering.
+- `git-stack cascade [--apply|--script]` — dry-run the cascade starting from the current branch or print a shell script for it.
 
 Behavior:
 - `graph` is read-only.

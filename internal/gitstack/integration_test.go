@@ -287,6 +287,58 @@ func TestCascadePlanShowsThreeRefRebase(t *testing.T) {
 	}
 }
 
+func TestCascadeScriptPrintsShellCommands(t *testing.T) {
+	repo := t.TempDir()
+	mustGit(t, repo, "init", "-b", "master")
+	mustGit(t, repo, "config", "user.name", "test")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+
+	writeFile(t, filepath.Join(repo, "base.txt"), "base\n")
+	mustGit(t, repo, "add", "base.txt")
+	mustGit(t, repo, "commit", "-m", "base")
+
+	mustGit(t, repo, "checkout", "-b", "branch1")
+	writeFile(t, filepath.Join(repo, "branch1.txt"), "branch1\n")
+	mustGit(t, repo, "add", "branch1.txt")
+	mustGit(t, repo, "commit", "-m", "branch1")
+
+	mustGit(t, repo, "checkout", "master")
+	writeFile(t, filepath.Join(repo, "master.txt"), "master-update\n")
+	mustGit(t, repo, "add", "master.txt")
+	mustGit(t, repo, "commit", "-m", "master update")
+
+	masterAfter := gitRevParse(t, repo, "master")
+
+	writeFile(t, filepath.Join(repo, ConfigFilename), strings.Join([]string{
+		"branch1=master",
+		"",
+	}, "\n"))
+
+	app := &App{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	mustGit(t, repo, "checkout", "branch1")
+
+	if err := app.Execute([]string{"cascade", "--script"}); err != nil {
+		t.Fatalf("cascade --script failed: %v", err)
+	}
+
+	output := app.Stdout.(*bytes.Buffer).String()
+	want := "git rebase " + masterAfter[:7] + " branch1 --onto master"
+	for _, snippet := range []string{"#!/usr/bin/env sh", "set -eu", want} {
+		if !strings.Contains(output, snippet) {
+			t.Fatalf("script output missing %q:\n%s", snippet, output)
+		}
+	}
+	if strings.Contains(output, "[Sync]") || strings.Contains(output, "git-stack cascade") {
+		t.Fatalf("script output should contain shell commands, not plan lines:\n%s", output)
+	}
+}
+
 func TestRebasePlanActionUsesOntoLastForMergeAware(t *testing.T) {
 	got := rebasePlanAction("onto", "abcdef1234567890", "branch1", true)
 	want := "git rebase --rebase-merges abcdef1 branch1 --onto onto"
@@ -307,8 +359,8 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 	output := stdout.String() + stderr.String()
 	for _, want := range []string{
 		"git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack",
-		"git-stack graph                          Show the branch graph and sync state",
-		"git-stack cascade [--apply]              Plan or apply the cascade from the current branch",
+		"git-stack graph [columns]                Show the branch graph and sync state, with optional column filtering",
+		"git-stack cascade [--apply|--script]     Plan, print a script, or apply the cascade from the current branch",
 		"git-stack completion <bash|zsh>          Print shell completion script",
 		"git-stack version                        Show the CLI version",
 	} {
@@ -320,7 +372,7 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 	cases := map[string]string{
 		"parent":  "usage: git-stack parent <parent> [<parent>...]",
 		"graph":   "usage: git-stack graph",
-		"cascade": "usage: git-stack cascade [--apply]",
+		"cascade": "usage: git-stack cascade [--apply|--script]",
 		"version": "usage: git-stack version",
 	}
 	for command, want := range cases {
@@ -464,6 +516,59 @@ func TestGraphCommandPresentsMixedLayout(t *testing.T) {
 	}
 }
 
+func TestGraphCommandFiltersColumns(t *testing.T) {
+	repo := t.TempDir()
+	mustGit(t, repo, "init", "-b", "master")
+	mustGit(t, repo, "config", "user.name", "test")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+
+	writeFile(t, filepath.Join(repo, "root.txt"), "root\n")
+	mustGit(t, repo, "add", "root.txt")
+	mustGit(t, repo, "commit", "-m", "root commit")
+
+	mustGit(t, repo, "checkout", "-b", "branch1")
+	writeFile(t, filepath.Join(repo, "branch1.txt"), "branch1\n")
+	mustGit(t, repo, "add", "branch1.txt")
+	mustGit(t, repo, "commit", "-m", "branch one")
+
+	writeFile(t, filepath.Join(repo, ConfigFilename), strings.Join([]string{
+		"master=",
+		"branch1=master",
+		"",
+	}, "\n"))
+
+	app := &App{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	mustGit(t, repo, "checkout", "master")
+
+	if err := app.Execute([]string{"graph", "branch,state"}); err != nil {
+		t.Fatalf("graph failed: %v", err)
+	}
+
+	output := app.Stdout.(*bytes.Buffer).String()
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 lines, got %d:\n%s", len(lines), output)
+	}
+	if lines[0] != "Graph:" {
+		t.Fatalf("missing graph title: %q", lines[0])
+	}
+	header := lines[1]
+	if !strings.Contains(header, "Branch") || !strings.Contains(header, "State") {
+		t.Fatalf("header missing selected columns:\n%s", header)
+	}
+	for _, unwanted := range []string{"Chart", "Hash", "Title", "Parents"} {
+		if strings.Contains(header, unwanted) {
+			t.Fatalf("header contains unexpected column %q:\n%s", unwanted, header)
+		}
+	}
+}
+
 func TestGraphCommandUsesColorsWhenForced(t *testing.T) {
 	repo := t.TempDir()
 	mustGit(t, repo, "init", "-b", "master")
@@ -518,7 +623,7 @@ func TestCompletionCommand(t *testing.T) {
 		t.Fatalf("Execute(completion bash) failed: %v", err)
 	}
 	bash := stdout.String()
-	for _, want := range []string{"complete -F _git_stack_completion git-stack", "compgen -W \"parent graph cascade completion version help --help -h --version -v\""} {
+	for _, want := range []string{"complete -F _git_stack_completion git-stack", "compgen -W \"parent graph cascade completion version help --help -h --version -v\"", "--apply --script --help -h"} {
 		if !strings.Contains(bash, want) {
 			t.Fatalf("bash completion missing %q:\n%s", want, bash)
 		}
@@ -529,7 +634,7 @@ func TestCompletionCommand(t *testing.T) {
 		t.Fatalf("Execute(completion zsh) failed: %v", err)
 	}
 	zsh := stdout.String()
-	for _, want := range []string{"#compdef git-stack", "compdef _git_stack_completion git-stack"} {
+	for _, want := range []string{"#compdef git-stack", "compdef _git_stack_completion git-stack", "--script[print a shell script]"} {
 		if !strings.Contains(zsh, want) {
 			t.Fatalf("zsh completion missing %q:\n%s", want, zsh)
 		}
