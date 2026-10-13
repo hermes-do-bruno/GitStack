@@ -104,6 +104,7 @@ Proposed commands:
 - `git-stack parent [name]` — create or update the current branch's parent entry in `.git-stack` using the current branch name and one or more comma-separated parent names.
 - `git-stack graph [columns]` — show branch states and cascade structure, with optional column filtering.
 - `git-stack cascade [--apply|--script]` — dry-run the cascade starting from the current branch or print a shell script for it.
+- `git-stack backup [--delete]` — create or delete backup branches with a `bkp/` prefix.
 
 Behavior:
 - `graph` is read-only.

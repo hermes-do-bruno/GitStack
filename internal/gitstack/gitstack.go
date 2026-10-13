@@ -143,6 +143,11 @@ func (a *App) Execute(args []string) error {
 			return a.cascadeHelp()
 		}
 		return a.runCascade(args[1:])
+	case "backup":
+		if hasHelpFlag(args[1:]) {
+			return a.backupHelp()
+		}
+		return a.runBackup(args[1:])
 	case "completion":
 		if hasHelpFlag(args[1:]) {
 			return a.completionHelp()
@@ -190,6 +195,11 @@ func (a *App) cascadeHelp() error {
 	return err
 }
 
+func (a *App) backupHelp() error {
+	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack backup [--delete]")
+	return err
+}
+
 func (a *App) completionHelp() error {
 	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack completion <bash|zsh>")
 	return err
@@ -205,6 +215,7 @@ Commands:
   git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack
   git-stack graph [columns]                Show the branch graph and sync state, with optional column filtering
   git-stack cascade [--apply|--script]     Plan, print a script, or apply the cascade from the current branch
+  git-stack backup [--delete]              Create or delete backup branches with bkp/ prefix
   git-stack completion <bash|zsh>          Print shell completion script
   git-stack version                        Show the CLI version
   git-stack help                           Show this help
@@ -214,7 +225,8 @@ Commands:
 Examples:
   git-stack parent master
   git-stack graph branch,state
-  git-stack cascade --script`)
+  git-stack cascade --script
+  git-stack backup`)
 }
 
 func bashCompletionScript() string {
@@ -224,7 +236,7 @@ func bashCompletionScript() string {
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   if [ "${COMP_CWORD}" -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "parent graph cascade completion version help --help -h --version -v" -- "$cur") )
+    COMPREPLY=( $(compgen -W "parent graph cascade backup completion version help --help -h --version -v" -- "$cur") )
     return 0
   fi
 
@@ -235,6 +247,9 @@ func bashCompletionScript() string {
       ;;
     cascade)
       COMPREPLY=( $(compgen -W "--apply --script --help -h" -- "$cur") )
+      ;;
+    backup)
+      COMPREPLY=( $(compgen -W "--delete --help -h" -- "$cur") )
       ;;
     graph)
       COMPREPLY=( $(compgen -W "--columns --format --help -h" -- "$cur") )
@@ -259,7 +274,7 @@ _git_stack_completion() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:command:(parent graph cascade completion version help)' \
+    '1:command:(parent graph cascade backup completion version help)' \
     '*::arg:->args'
 
   case "$state" in
@@ -271,6 +286,9 @@ _git_stack_completion() {
           ;;
         cascade)
           _arguments '--apply[apply the cascade]' '--script[print a shell script]' '--help[show help]' '-h[show help]'
+          ;;
+        backup)
+          _arguments '--delete[delete backup branches]' '--help[show help]' '-h[show help]'
           ;;
         graph)
           _arguments '--columns[filter graph columns]' '--format[filter graph columns]' '--help[show help]' '-h[show help]'
@@ -846,6 +864,74 @@ func (a *App) runCascade(args []string) error {
 	return nil
 }
 
+func (a *App) runBackup(args []string) error {
+	deleteMode := false
+	for len(args) > 0 {
+		switch args[0] {
+		case "--delete":
+			deleteMode = true
+		default:
+			return cliErrorf("usage: git-stack backup [--delete]")
+		}
+		args = args[1:]
+	}
+
+	root, err := repoRoot()
+	if err != nil {
+		return err
+	}
+	cfg, err := loadConfig(filepath.Join(root, ConfigFilename))
+	if err != nil {
+		return err
+	}
+	branches := cfg.Branches()
+	if len(branches) == 0 {
+		return cliErrorf("no branches declared in %s", ConfigFilename)
+	}
+
+	for _, branch := range branches {
+		if ok, err := gitRefExists(root, branch); err != nil {
+			return err
+		} else if !ok {
+			return cliErrorf("branch %q does not exist", branch)
+		}
+		backupRef := backupBranchName(branch)
+		if deleteMode {
+			if ok, err := gitRefExists(root, backupRef); err != nil {
+				return err
+			} else if !ok {
+				return cliErrorf("backup branch %q does not exist", backupRef)
+			}
+			continue
+		}
+		if ok, err := gitRefExists(root, backupRef); err != nil {
+			return err
+		} else if ok {
+			return cliErrorf("backup branch %q already exists", backupRef)
+		}
+	}
+
+	for _, branch := range branches {
+		backupRef := backupBranchName(branch)
+		if deleteMode {
+			if _, err := runGit(root, "branch", "-D", backupRef); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(a.Stdout, "deleted %s\n", backupRef); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := runGit(root, "branch", backupRef, branch); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(a.Stdout, "%s -> %s\n", branch, backupRef); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func renderCascadeScript(w io.Writer, plans []branchPlan) error {
 	if _, err := fmt.Fprintln(w, "#!/usr/bin/env sh"); err != nil {
 		return err
@@ -933,6 +1019,23 @@ func isAncestor(root, ancestor, descendant string) bool {
 	cmd := exec.Command("git", "merge-base", "--is-ancestor", ancestor, descendant)
 	cmd.Dir = root
 	return cmd.Run() == nil
+}
+
+func gitRefExists(root, ref string) (bool, error) {
+	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+ref)
+	cmd.Dir = root
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func backupBranchName(branch string) string {
+	return "bkp/" + branch
 }
 
 func branchState(root, branch string, parents []string, cache map[string]string) (BranchState, error) {
@@ -1160,6 +1263,16 @@ func (c *ConfigFile) Parents(branch string) []string {
 		}
 	}
 	return nil
+}
+
+func (c *ConfigFile) Branches() []string {
+	branches := make([]string, 0, len(c.EntryIndexes))
+	for _, line := range c.Lines {
+		if line.Kind == LineEntry {
+			branches = append(branches, line.Branch)
+		}
+	}
+	return branches
 }
 
 func (c *ConfigFile) Upsert(branch string, parents []string) {
