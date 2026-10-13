@@ -65,8 +65,8 @@ func TestCascadeApplyRebasesStackedRepo(t *testing.T) {
 
 	mustGit(t, repo, "checkout", "branch1")
 
-	if err := app.Execute([]string{"cascade", "--apply"}); err != nil {
-		t.Fatalf("cascade --apply failed: %v", err)
+	if err := app.Execute([]string{"cascade"}); err != nil {
+		t.Fatalf("cascade failed: %v", err)
 	}
 
 	branch1After := gitRevParse(t, repo, "branch1")
@@ -139,8 +139,8 @@ func TestCascadeApplyRebasesBranchesWithMultipleCommits(t *testing.T) {
 
 	mustGit(t, repo, "checkout", "branch1")
 
-	if err := app.Execute([]string{"cascade", "--apply"}); err != nil {
-		t.Fatalf("cascade --apply failed: %v", err)
+	if err := app.Execute([]string{"cascade"}); err != nil {
+		t.Fatalf("cascade failed: %v", err)
 	}
 
 	branch1After := gitRevParse(t, repo, "branch1")
@@ -228,7 +228,7 @@ func TestCascadeApplySurfacesRebaseConflicts(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
 
-	err := app.Execute([]string{"cascade", "--apply"})
+	err := app.Execute([]string{"cascade"})
 	if err == nil {
 		t.Fatal("expected cascade to fail")
 	}
@@ -323,8 +323,8 @@ func TestCascadeScriptPrintsShellCommands(t *testing.T) {
 
 	mustGit(t, repo, "checkout", "branch1")
 
-	if err := app.Execute([]string{"cascade", "--script"}); err != nil {
-		t.Fatalf("cascade --script failed: %v", err)
+	if err := app.Execute([]string{"--script", "cascade"}); err != nil {
+		t.Fatalf("--script cascade failed: %v", err)
 	}
 
 	output := app.Stdout.(*bytes.Buffer).String()
@@ -336,6 +336,13 @@ func TestCascadeScriptPrintsShellCommands(t *testing.T) {
 	}
 	if strings.Contains(output, "[Sync]") || strings.Contains(output, "git-stack cascade") {
 		t.Fatalf("script output should contain shell commands, not plan lines:\n%s", output)
+	}
+
+	if err := app.Execute([]string{"cascade", "--script"}); err == nil {
+		t.Fatal("expected cascade --script to fail")
+	}
+	if err := app.Execute([]string{"cascade", "--apply"}); err == nil {
+		t.Fatal("expected cascade --apply to fail")
 	}
 }
 
@@ -427,7 +434,7 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 		"git-stack [--script] <command> [args]",
 		"git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack",
 		"git-stack graph [columns]                Show the branch graph and sync state, with optional column filtering",
-		"git-stack cascade [--apply|--script]     Plan, print a script, or apply the cascade from the current branch",
+		"git-stack cascade                        Apply the cascade from the current branch",
 		"git-stack backup [--delete]              Create or delete backup branches with bkp/ prefix",
 		"git-stack completion <bash|zsh>          Print shell completion script",
 		"git-stack version                        Show the CLI version",
@@ -440,7 +447,7 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 	cases := map[string]string{
 		"parent":  "usage: git-stack parent <parent> [<parent>...]",
 		"graph":   "usage: git-stack graph [columns|--columns <list>|--format <list>]",
-		"cascade": "usage: git-stack cascade [--apply|--script]",
+		"cascade": "usage: git-stack cascade",
 		"backup":  "usage: git-stack backup [--delete]",
 		"version": "usage: git-stack version",
 	}
@@ -766,7 +773,7 @@ func TestCompletionCommand(t *testing.T) {
 		t.Fatalf("Execute(completion bash) failed: %v", err)
 	}
 	bash := stdout.String()
-	for _, want := range []string{"complete -F _git_stack_completion git-stack", "compgen -W \"parent graph cascade backup completion version help --help -h --version -v --script\"", "--apply --script --help -h", "--delete --help -h"} {
+	for _, want := range []string{"complete -F _git_stack_completion git-stack", "compgen -W \"parent graph cascade backup completion version help --help -h --version -v --script\"", "--help -h", "--delete --help -h"} {
 		if !strings.Contains(bash, want) {
 			t.Fatalf("bash completion missing %q:\n%s", want, bash)
 		}
@@ -777,7 +784,7 @@ func TestCompletionCommand(t *testing.T) {
 		t.Fatalf("Execute(completion zsh) failed: %v", err)
 	}
 	zsh := stdout.String()
-	for _, want := range []string{"#compdef git-stack", "compdef _git_stack_completion git-stack", "1:command:(parent graph cascade backup completion version help --script)", "--script[print a shell script]", "--delete[delete backup branches]"} {
+	for _, want := range []string{"#compdef git-stack", "compdef _git_stack_completion git-stack", "1:command:(parent graph cascade backup completion version help --script)", "--delete[delete backup branches]"} {
 		if !strings.Contains(zsh, want) {
 			t.Fatalf("zsh completion missing %q:\n%s", want, zsh)
 		}

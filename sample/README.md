@@ -23,6 +23,8 @@ Run a script directly:
 
 Each script writes its repo into a matching directory under `sample/out/`.
 
+For command previews, use the root script flag, for example `git-stack --script cascade`.
+
 Pass a custom output directory as the first argument:
 
 ```bash

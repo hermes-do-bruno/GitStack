@@ -205,7 +205,7 @@ func (a *App) graphHelp() error {
 }
 
 func (a *App) cascadeHelp() error {
-	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack cascade [--apply|--script]")
+	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack cascade")
 	return err
 }
 
@@ -228,7 +228,7 @@ Usage:
 Commands:
   git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack
   git-stack graph [columns]                Show the branch graph and sync state, with optional column filtering
-  git-stack cascade [--apply|--script]     Plan, print a script, or apply the cascade from the current branch
+  git-stack cascade                        Apply the cascade from the current branch
   git-stack backup [--delete]              Create or delete backup branches with bkp/ prefix
   git-stack completion <bash|zsh>          Print shell completion script
   git-stack version                        Show the CLI version
@@ -239,7 +239,7 @@ Commands:
 Examples:
   git-stack parent master
   git-stack graph branch,state
-  git-stack cascade --script
+  git-stack cascade
   git-stack backup`)
 }
 
@@ -260,7 +260,7 @@ func bashCompletionScript() string {
       COMPREPLY=( $(compgen -W "$refs --help -h" -- "$cur") )
       ;;
     cascade)
-      COMPREPLY=( $(compgen -W "--apply --script --help -h" -- "$cur") )
+      COMPREPLY=( $(compgen -W "--help -h" -- "$cur") )
       ;;
     backup)
       COMPREPLY=( $(compgen -W "--delete --help -h" -- "$cur") )
@@ -299,7 +299,7 @@ _git_stack_completion() {
           compadd -- $branches
           ;;
         cascade)
-          _arguments '--apply[apply the cascade]' '--script[print a shell script]' '--help[show help]' '-h[show help]'
+          _arguments '--help[show help]' '-h[show help]'
           ;;
         backup)
           _arguments '--delete[delete backup branches]' '--help[show help]' '-h[show help]'
@@ -777,21 +777,8 @@ func graphChildren(cfg *ConfigFile, children map[string][]string, branch string,
 }
 
 func (a *App) runCascade(args []string) error {
-	apply := false
-	script := a.scriptMode
-	for len(args) > 0 {
-		switch args[0] {
-		case "--apply":
-			apply = true
-		case "--script":
-			script = true
-		default:
-			return cliErrorf("usage: git-stack cascade [--apply|--script]")
-		}
-		args = args[1:]
-	}
-	if apply && script {
-		return cliErrorf("usage: git-stack cascade [--apply|--script]")
+	if len(args) != 0 {
+		return cliErrorf("usage: git-stack cascade")
 	}
 
 	root, err := repoRoot()
@@ -852,7 +839,7 @@ func (a *App) runCascade(args []string) error {
 		plans = append(plans, branchPlan{Branch: branch, Hash: branchHash, State: state, Action: rebasePlanAction(targetRef, upstreamHash, branch, len(parents) > 1), TargetRef: targetRef, UpstreamHash: upstreamHash})
 	}
 
-	if script {
+	if a.scriptMode {
 		return renderCascadeScript(a.Stdout, plans)
 	}
 
@@ -862,25 +849,23 @@ func (a *App) runCascade(args []string) error {
 		}
 	}
 
-	if apply {
-		for _, plan := range plans {
-			if plan.Action == "skip merged" || plan.Action == "skip (no parents)" {
-				continue
-			}
-			targetHash, err := refHash(root, plan.TargetRef, currentHashes)
-			if err != nil {
-				return err
-			}
-			if err := rebaseBranch(root, plan.Branch, plan.TargetRef, targetHash, plan.UpstreamHash, len(cfg.Parents(plan.Branch)) > 1); err != nil {
-				return err
-			}
-			delete(currentHashes, plan.Branch)
-			updated, err := refHash(root, plan.Branch, currentHashes)
-			if err != nil {
-				return err
-			}
-			currentHashes[plan.Branch] = updated
+	for _, plan := range plans {
+		if plan.Action == "skip merged" || plan.Action == "skip (no parents)" {
+			continue
 		}
+		targetHash, err := refHash(root, plan.TargetRef, currentHashes)
+		if err != nil {
+			return err
+		}
+		if err := rebaseBranch(root, plan.Branch, plan.TargetRef, targetHash, plan.UpstreamHash, len(cfg.Parents(plan.Branch)) > 1); err != nil {
+			return err
+		}
+		delete(currentHashes, plan.Branch)
+		updated, err := refHash(root, plan.Branch, currentHashes)
+		if err != nil {
+			return err
+		}
+		currentHashes[plan.Branch] = updated
 	}
 	return nil
 }

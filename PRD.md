@@ -103,7 +103,7 @@ Proposed commands:
 
 - `git-stack parent [name]` — create or update the current branch's parent entry in `.git-stack` using the current branch name and one or more comma-separated parent names.
 - `git-stack graph [columns]` — show branch states and cascade structure, with optional column filtering.
-- `git-stack cascade [--apply|--script]` — dry-run the cascade starting from the current branch or print a shell script for it.
+- `git-stack cascade` — apply the cascade starting from the current branch.
 - `git-stack backup [--delete]` — create or delete backup branches with a `bkp/` prefix.
 - `git-stack --script <command> [args]` — print the shell script for scriptable commands.
 
@@ -120,11 +120,11 @@ Behavior:
 - `cascade` traverses descendants top-down.
 - `cascade` skips branches in `Merged` state.
 - `cascade` stops on the first conflict and leaves Git in rebase state.
-- `cascade` is dry-run by default; execution requires an explicit `--apply` flag.
-- `cascade --apply` uses the same line style as `graph`.
-- `cascade --apply` replaces the commit subject field with the planned action for that branch.
-- `cascade --apply` renders the action as `rebase onto <target>` for rebase steps and `skip merged` for merged branches.
-- Dry-run output shows one line per planned branch action with the target base.
+- `cascade` applies by default from the current branch downward.
+- `cascade` prints the planned actions before changing history.
+- `cascade` uses the same line style as `graph` for the printed plan.
+- `cascade` renders the action as `rebase onto <target>` for rebase steps and `skip merged` for merged branches.
+- Root `--script` prints the shell script for `cascade` instead of executing it.
 - The declaration order in `.git-stack` defines child ordering.
 - `parent [name]` updates the root `.git-stack` file rather than inferring config from hidden state.
 - `parent [name]` preserves existing comments and blank lines when rewriting the file.
