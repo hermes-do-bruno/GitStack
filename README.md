@@ -107,6 +107,8 @@ The workflow builds release archives for:
 Each archive includes the `git-stack` binary and a SHA-256 checksum.
 
 
+The root command also accepts `--script` to print the shell script for commands that support it.
+
 - `git-stack parent [name]` — set the current branch parent(s) in `.git-stack`
 - `git-stack graph [columns]` — show the branch graph and sync state, with optional column filtering
 - `git-stack cascade [--apply|--script]` — plan, print a script, or apply the cascade from the current branch

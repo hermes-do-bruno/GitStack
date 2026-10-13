@@ -15,8 +15,9 @@ import (
 const ConfigFilename = ".git-stack"
 
 type App struct {
-	Stdout io.Writer
-	Stderr io.Writer
+	Stdout     io.Writer
+	Stderr     io.Writer
+	scriptMode bool
 }
 
 var Version = "dev"
@@ -127,6 +128,19 @@ func (a *App) Execute(args []string) error {
 		return a.help()
 	}
 
+	scriptMode := a.scriptMode
+	defer func() {
+		a.scriptMode = scriptMode
+	}()
+
+	for len(args) > 0 && args[0] == "--script" {
+		a.scriptMode = true
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		return a.help()
+	}
+
 	switch args[0] {
 	case "parent":
 		if hasHelpFlag(args[1:]) {
@@ -209,7 +223,7 @@ func helpText() string {
 	return strings.TrimSpace(`git-stack - stacked-branch workflow tool
 
 Usage:
-  git-stack <command> [args]
+  git-stack [--script] <command> [args]
 
 Commands:
   git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack
@@ -236,7 +250,7 @@ func bashCompletionScript() string {
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   if [ "${COMP_CWORD}" -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "parent graph cascade backup completion version help --help -h --version -v" -- "$cur") )
+    COMPREPLY=( $(compgen -W "parent graph cascade backup completion version help --help -h --version -v --script" -- "$cur") )
     return 0
   fi
 
@@ -274,7 +288,7 @@ _git_stack_completion() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:command:(parent graph cascade backup completion version help)' \
+    '1:command:(parent graph cascade backup completion version help --script)' \
     '*::arg:->args'
 
   case "$state" in
@@ -347,6 +361,9 @@ func (a *App) runParent(args []string) error {
 	if err != nil {
 		return err
 	}
+	if a.scriptMode {
+		return renderParentScript(a.Stdout, current, args)
+	}
 	cfgPath := filepath.Join(root, ConfigFilename)
 	cfg, err := loadConfig(cfgPath)
 	if err != nil {
@@ -387,6 +404,10 @@ func (a *App) runGraph(args []string) error {
 	}
 	if len(order) == 0 {
 		return cliErrorf("branch %q is not declared in %s", current, ConfigFilename)
+	}
+
+	if a.scriptMode {
+		return renderGraphScript(a.Stdout, root, current, order, cfg)
 	}
 
 	reachable := make(map[string]bool, len(order))
@@ -757,7 +778,7 @@ func graphChildren(cfg *ConfigFile, children map[string][]string, branch string,
 
 func (a *App) runCascade(args []string) error {
 	apply := false
-	script := false
+	script := a.scriptMode
 	for len(args) > 0 {
 		switch args[0] {
 		case "--apply":
@@ -911,6 +932,10 @@ func (a *App) runBackup(args []string) error {
 		}
 	}
 
+	if a.scriptMode {
+		return renderBackupScript(a.Stdout, branches, deleteMode)
+	}
+
 	for _, branch := range branches {
 		backupRef := backupBranchName(branch)
 		if deleteMode {
@@ -956,6 +981,100 @@ func renderCascadeScript(w io.Writer, plans []branchPlan) error {
 			return err
 		}
 		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func renderParentScript(w io.Writer, current string, parents []string) error {
+	if _, err := fmt.Fprintln(w, "#!/usr/bin/env sh"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "set -eu"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "current=$(git branch --show-current)"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "printf '%%s=%%s\\n' \"$current\" %q\n", strings.Join(parents, ",")); err != nil {
+		return err
+	}
+	return nil
+}
+
+func renderGraphScript(w io.Writer, root, current string, order []string, cfg *ConfigFile) error {
+	if _, err := fmt.Fprintln(w, "#!/usr/bin/env sh"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "set -eu"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "git rev-parse --show-toplevel"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "git branch --show-current"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+	for _, branch := range order {
+		if _, err := fmt.Fprintf(w, "# inspect %s\n", branch); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "git rev-parse %s\n", branch); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "git log -1 --format=%%s %s\n", branch); err != nil {
+			return err
+		}
+		parents := cfg.Parents(branch)
+		for _, parent := range parents {
+			if _, err := fmt.Fprintf(w, "git rev-parse %s\n", parent); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, "git rev-parse %s^\n", branch); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, "git merge-base --is-ancestor %s %s\n", parent, branch); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
+	}
+	_ = root
+	_ = current
+	return nil
+}
+
+func renderBackupScript(w io.Writer, branches []string, deleteMode bool) error {
+	if _, err := fmt.Fprintln(w, "#!/usr/bin/env sh"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "set -eu"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+	for _, branch := range branches {
+		backupRef := backupBranchName(branch)
+		if deleteMode {
+			if _, err := fmt.Fprintf(w, "git branch -D %s\n", backupRef); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := fmt.Fprintf(w, "git branch %s %s\n", backupRef, branch); err != nil {
 			return err
 		}
 	}

@@ -105,6 +105,7 @@ Proposed commands:
 - `git-stack graph [columns]` — show branch states and cascade structure, with optional column filtering.
 - `git-stack cascade [--apply|--script]` — dry-run the cascade starting from the current branch or print a shell script for it.
 - `git-stack backup [--delete]` — create or delete backup branches with a `bkp/` prefix.
+- `git-stack --script <command> [args]` — print the shell script for scriptable commands.
 
 Behavior:
 - `graph` is read-only.

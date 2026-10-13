@@ -293,9 +293,9 @@ func TestCascadeScriptPrintsShellCommands(t *testing.T) {
 	mustGit(t, repo, "config", "user.name", "test")
 	mustGit(t, repo, "config", "user.email", "test@example.com")
 
-	writeFile(t, filepath.Join(repo, "base.txt"), "base\n")
-	mustGit(t, repo, "add", "base.txt")
-	mustGit(t, repo, "commit", "-m", "base")
+	writeFile(t, filepath.Join(repo, "root.txt"), "root\n")
+	mustGit(t, repo, "add", "root.txt")
+	mustGit(t, repo, "commit", "-m", "root commit")
 
 	mustGit(t, repo, "checkout", "-b", "branch1")
 	writeFile(t, filepath.Join(repo, "branch1.txt"), "branch1\n")
@@ -339,6 +339,72 @@ func TestCascadeScriptPrintsShellCommands(t *testing.T) {
 	}
 }
 
+func TestRootScriptFlagPrintsCascadeBackupAndGraphScripts(t *testing.T) {
+	repo := t.TempDir()
+	mustGit(t, repo, "init", "-b", "master")
+	mustGit(t, repo, "config", "user.name", "test")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+
+	writeFile(t, filepath.Join(repo, "root.txt"), "root\n")
+	mustGit(t, repo, "add", "root.txt")
+	mustGit(t, repo, "commit", "-m", "root commit")
+
+	mustGit(t, repo, "checkout", "-b", "branch1")
+	writeFile(t, filepath.Join(repo, "branch1.txt"), "branch1\n")
+	mustGit(t, repo, "add", "branch1.txt")
+	mustGit(t, repo, "commit", "-m", "branch1")
+
+	writeFile(t, filepath.Join(repo, ConfigFilename), strings.Join([]string{
+		"master=",
+		"branch1=master",
+		"",
+	}, "\n"))
+
+	app := &App{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	if err := app.Execute([]string{"--script", "backup"}); err != nil {
+		t.Fatalf("--script backup failed: %v", err)
+	}
+	backupScript := app.Stdout.(*bytes.Buffer).String()
+	for _, want := range []string{"#!/usr/bin/env sh", "git branch bkp/master master", "git branch bkp/branch1 branch1"} {
+		if !strings.Contains(backupScript, want) {
+			t.Fatalf("backup script missing %q:\n%s", want, backupScript)
+		}
+	}
+
+	app.Stdout.(*bytes.Buffer).Reset()
+	if err := app.Execute([]string{"backup"}); err != nil {
+		t.Fatalf("backup setup failed: %v", err)
+	}
+
+	app.Stdout.(*bytes.Buffer).Reset()
+	if err := app.Execute([]string{"--script", "backup", "--delete"}); err != nil {
+		t.Fatalf("--script backup --delete failed: %v", err)
+	}
+	deleteScript := app.Stdout.(*bytes.Buffer).String()
+	for _, want := range []string{"git branch -D bkp/master", "git branch -D bkp/branch1"} {
+		if !strings.Contains(deleteScript, want) {
+			t.Fatalf("backup delete script missing %q:\n%s", want, deleteScript)
+		}
+	}
+
+	app.Stdout.(*bytes.Buffer).Reset()
+	if err := app.Execute([]string{"--script", "graph"}); err != nil {
+		t.Fatalf("--script graph failed: %v", err)
+	}
+	graphScript := app.Stdout.(*bytes.Buffer).String()
+	for _, want := range []string{"git rev-parse --show-toplevel", "git branch --show-current", "git log -1 --format=%s branch1"} {
+		if !strings.Contains(graphScript, want) {
+			t.Fatalf("graph script missing %q:\n%s", want, graphScript)
+		}
+	}
+}
+
 func TestRebasePlanActionUsesOntoLastForMergeAware(t *testing.T) {
 	got := rebasePlanAction("onto", "abcdef1234567890", "branch1", true)
 	want := "git rebase --rebase-merges abcdef1 branch1 --onto onto"
@@ -358,6 +424,7 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 
 	output := stdout.String() + stderr.String()
 	for _, want := range []string{
+		"git-stack [--script] <command> [args]",
 		"git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack",
 		"git-stack graph [columns]                Show the branch graph and sync state, with optional column filtering",
 		"git-stack cascade [--apply|--script]     Plan, print a script, or apply the cascade from the current branch",
@@ -699,7 +766,7 @@ func TestCompletionCommand(t *testing.T) {
 		t.Fatalf("Execute(completion bash) failed: %v", err)
 	}
 	bash := stdout.String()
-	for _, want := range []string{"complete -F _git_stack_completion git-stack", "compgen -W \"parent graph cascade backup completion version help --help -h --version -v\"", "--apply --script --help -h", "--delete --help -h"} {
+	for _, want := range []string{"complete -F _git_stack_completion git-stack", "compgen -W \"parent graph cascade backup completion version help --help -h --version -v --script\"", "--apply --script --help -h", "--delete --help -h"} {
 		if !strings.Contains(bash, want) {
 			t.Fatalf("bash completion missing %q:\n%s", want, bash)
 		}
@@ -710,7 +777,7 @@ func TestCompletionCommand(t *testing.T) {
 		t.Fatalf("Execute(completion zsh) failed: %v", err)
 	}
 	zsh := stdout.String()
-	for _, want := range []string{"#compdef git-stack", "compdef _git_stack_completion git-stack", "--script[print a shell script]", "--delete[delete backup branches]"} {
+	for _, want := range []string{"#compdef git-stack", "compdef _git_stack_completion git-stack", "1:command:(parent graph cascade backup completion version help --script)", "--script[print a shell script]", "--delete[delete backup branches]"} {
 		if !strings.Contains(zsh, want) {
 			t.Fatalf("zsh completion missing %q:\n%s", want, zsh)
 		}
