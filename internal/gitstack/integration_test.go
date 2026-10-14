@@ -68,6 +68,9 @@ func TestCascadeApplyRebasesStackedRepo(t *testing.T) {
 	if err := app.Execute([]string{"cascade"}); err != nil {
 		t.Fatalf("cascade failed: %v", err)
 	}
+	if got := currentBranchName(t, repo); got != "branch1" {
+		t.Fatalf("cascade should return to original branch, got %q", got)
+	}
 
 	branch1After := gitRevParse(t, repo, "branch1")
 	branch2After := gitRevParse(t, repo, "branch2")
@@ -141,6 +144,9 @@ func TestCascadeApplyRebasesBranchesWithMultipleCommits(t *testing.T) {
 
 	if err := app.Execute([]string{"cascade"}); err != nil {
 		t.Fatalf("cascade failed: %v", err)
+	}
+	if got := currentBranchName(t, repo); got != "branch1" {
+		t.Fatalf("cascade should return to original branch, got %q", got)
 	}
 
 	branch1After := gitRevParse(t, repo, "branch1")
@@ -329,7 +335,7 @@ func TestCascadeScriptPrintsShellCommands(t *testing.T) {
 
 	output := app.Stdout.(*bytes.Buffer).String()
 	want := "git rebase " + masterAfter[:7] + " branch1 --onto master"
-	for _, snippet := range []string{"#!/usr/bin/env sh", "set -eu", want} {
+	for _, snippet := range []string{"#!/usr/bin/env sh", "set -eu", "current_branch=$(git branch --show-current)", want, "git checkout \"$current_branch\""} {
 		if !strings.Contains(output, snippet) {
 			t.Fatalf("script output missing %q:\n%s", snippet, output)
 		}
@@ -344,6 +350,17 @@ func TestCascadeScriptPrintsShellCommands(t *testing.T) {
 	if err := app.Execute([]string{"cascade", "--apply"}); err == nil {
 		t.Fatal("expected cascade --apply to fail")
 	}
+}
+
+func currentBranchName(t *testing.T, repo string) string {
+	t.Helper()
+	cmd := exec.Command("git", "branch", "--show-current")
+	cmd.Dir = repo
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git branch --show-current failed: %v\n%s", err, string(out))
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func TestRootScriptFlagPrintsCascadeBackupAndGraphScripts(t *testing.T) {
@@ -378,7 +395,7 @@ func TestRootScriptFlagPrintsCascadeBackupAndGraphScripts(t *testing.T) {
 		t.Fatalf("--script backup failed: %v", err)
 	}
 	backupScript := app.Stdout.(*bytes.Buffer).String()
-	for _, want := range []string{"#!/usr/bin/env sh", "git branch bkp/master master", "git branch bkp/branch1 branch1"} {
+	for _, want := range []string{"#!/usr/bin/env sh", "git show-ref --verify --quiet refs/heads/bkp/master", "branch_hash=$(git rev-parse master)", "backup_hash=$(git rev-parse bkp/master)", "exists/sync", "exists/unsync", "git branch bkp/master master", "git branch bkp/branch1 branch1"} {
 		if !strings.Contains(backupScript, want) {
 			t.Fatalf("backup script missing %q:\n%s", want, backupScript)
 		}
@@ -389,25 +406,42 @@ func TestRootScriptFlagPrintsCascadeBackupAndGraphScripts(t *testing.T) {
 		t.Fatalf("backup setup failed: %v", err)
 	}
 
-	app.Stdout.(*bytes.Buffer).Reset()
-	if err := app.Execute([]string{"--script", "backup", "--delete"}); err != nil {
-		t.Fatalf("--script backup --delete failed: %v", err)
+	stdout := app.Stdout.(*bytes.Buffer)
+	stdout.Reset()
+	if err := app.Execute([]string{"backup"}); err != nil {
+		t.Fatalf("backup should ignore existing backup branches: %v", err)
 	}
-	deleteScript := app.Stdout.(*bytes.Buffer).String()
-	for _, want := range []string{"git branch -D bkp/master", "git branch -D bkp/branch1"} {
-		if !strings.Contains(deleteScript, want) {
-			t.Fatalf("backup delete script missing %q:\n%s", want, deleteScript)
+	secondOutput := stdout.String()
+	for _, want := range []string{"master -> bkp/master (exists/sync)", "branch1 -> bkp/branch1 (exists/sync)"} {
+		if !strings.Contains(secondOutput, want) {
+			t.Fatalf("backup output missing %q:\n%s", want, secondOutput)
 		}
 	}
 
-	app.Stdout.(*bytes.Buffer).Reset()
-	if err := app.Execute([]string{"--script", "graph"}); err != nil {
-		t.Fatalf("--script graph failed: %v", err)
+	mustGit(t, repo, "checkout", "branch1")
+	writeFile(t, filepath.Join(repo, "branch1.txt"), "branch1 updated\n")
+	mustGit(t, repo, "add", "branch1.txt")
+	mustGit(t, repo, "commit", "-m", "branch1 updated")
+
+	stdout.Reset()
+	if err := app.Execute([]string{"backup"}); err != nil {
+		t.Fatalf("backup should report branch1 as unsynced: %v", err)
 	}
-	graphScript := app.Stdout.(*bytes.Buffer).String()
-	for _, want := range []string{"git rev-parse --show-toplevel", "git branch --show-current", "git log -1 --format=%s branch1"} {
-		if !strings.Contains(graphScript, want) {
-			t.Fatalf("graph script missing %q:\n%s", want, graphScript)
+	thirdOutput := stdout.String()
+	for _, want := range []string{"master -> bkp/master (exists/sync)", "branch1 -> bkp/branch1 (exists/unsync)"} {
+		if !strings.Contains(thirdOutput, want) {
+			t.Fatalf("backup output missing %q:\n%s", want, thirdOutput)
+		}
+	}
+
+	stdout.Reset()
+	if err := app.Execute([]string{"backup", "--delete"}); err != nil {
+		t.Fatalf("backup --delete failed: %v", err)
+	}
+	deleteOutput := stdout.String()
+	for _, want := range []string{"deleted bkp/master", "deleted bkp/branch1"} {
+		if !strings.Contains(deleteOutput, want) {
+			t.Fatalf("delete output missing %q:\n%s", want, deleteOutput)
 		}
 	}
 }
@@ -433,7 +467,7 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 	for _, want := range []string{
 		"git-stack [--script] <command> [args]",
 		"git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack",
-		"git-stack graph [columns]                Show the branch graph and sync state, with optional column filtering",
+		"git-stack graph [--all] [columns]        Show the branch graph and sync state, with optional column filtering",
 		"git-stack cascade                        Apply the cascade from the current branch",
 		"git-stack backup [--delete]              Create or delete backup branches with bkp/ prefix",
 		"git-stack completion <bash|zsh>          Print shell completion script",
@@ -446,7 +480,7 @@ func TestHelpShowsCommandsAndParameters(t *testing.T) {
 
 	cases := map[string]string{
 		"parent":  "usage: git-stack parent <parent> [<parent>...]",
-		"graph":   "usage: git-stack graph [columns|--columns <list>|--format <list>]",
+		"graph":   "usage: git-stack graph [--all] [columns|--columns <list>|--format <list>]",
 		"cascade": "usage: git-stack cascade",
 		"backup":  "usage: git-stack backup [--delete]",
 		"version": "usage: git-stack version",
@@ -645,6 +679,71 @@ func TestGraphCommandFiltersColumns(t *testing.T) {
 	}
 }
 
+func TestGraphCommandAllIncludesEveryDeclaredBranch(t *testing.T) {
+	repo := t.TempDir()
+	mustGit(t, repo, "init", "-b", "master")
+	mustGit(t, repo, "config", "user.name", "test")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+
+	writeFile(t, filepath.Join(repo, "root.txt"), "root\n")
+	mustGit(t, repo, "add", "root.txt")
+	mustGit(t, repo, "commit", "-m", "root commit")
+
+	mustGit(t, repo, "checkout", "-b", "branch1")
+	writeFile(t, filepath.Join(repo, "branch1.txt"), "branch1\n")
+	mustGit(t, repo, "add", "branch1.txt")
+	mustGit(t, repo, "commit", "-m", "branch one")
+
+	mustGit(t, repo, "checkout", "master")
+	mustGit(t, repo, "checkout", "-b", "branch2")
+	writeFile(t, filepath.Join(repo, "branch2.txt"), "branch2\n")
+	mustGit(t, repo, "add", "branch2.txt")
+	mustGit(t, repo, "commit", "-m", "branch two")
+
+	writeFile(t, filepath.Join(repo, ConfigFilename), strings.Join([]string{
+		"master=",
+		"branch1=master",
+		"branch2=master",
+		"",
+	}, "\n"))
+
+	app := &App{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	mustGit(t, repo, "checkout", "branch1")
+
+	if err := app.Execute([]string{"graph"}); err != nil {
+		t.Fatalf("graph failed: %v", err)
+	}
+	defaultOutput := app.Stdout.(*bytes.Buffer).String()
+	defaultLines := strings.Split(strings.TrimSpace(defaultOutput), "\n")
+	if len(defaultLines) != 4 {
+		t.Fatalf("expected 4 lines for subtree graph, got %d:\n%s", len(defaultLines), defaultOutput)
+	}
+	if !strings.Contains(defaultOutput, "branch1") || strings.Contains(defaultOutput, "branch2") {
+		t.Fatalf("subtree graph should only include branch1:\n%s", defaultOutput)
+	}
+
+	app.Stdout.(*bytes.Buffer).Reset()
+	if err := app.Execute([]string{"graph", "--all"}); err != nil {
+		t.Fatalf("graph --all failed: %v", err)
+	}
+	allOutput := app.Stdout.(*bytes.Buffer).String()
+	allLines := strings.Split(strings.TrimSpace(allOutput), "\n")
+	if len(allLines) != 6 {
+		t.Fatalf("expected 6 lines for graph --all, got %d:\n%s", len(allLines), allOutput)
+	}
+	for _, want := range []string{"master", "branch1", "branch2"} {
+		if !strings.Contains(allOutput, want) {
+			t.Fatalf("graph --all missing %q:\n%s", want, allOutput)
+		}
+	}
+}
+
 func TestGraphCommandUsesColorsWhenForced(t *testing.T) {
 	repo := t.TempDir()
 	mustGit(t, repo, "init", "-b", "master")
@@ -733,19 +832,40 @@ func TestBackupCommandCreatesAndDeletesBackupBranches(t *testing.T) {
 	}
 
 	output := app.Stdout.(*bytes.Buffer).String()
-	for _, want := range []string{"master -> bkp/master", "branch1 -> bkp/branch1"} {
+	for _, want := range []string{"master -> bkp/master (created)", "branch1 -> bkp/branch1 (created)"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("backup output missing %q:\n%s", want, output)
 		}
 	}
 
-	if err := app.Execute([]string{"backup"}); err == nil {
-		t.Fatal("expected backup to fail when backup branches already exist")
-	} else if !strings.Contains(err.Error(), "backup branch \"bkp/master\" already exists") {
-		t.Fatalf("unexpected backup error: %v", err)
+	stdout := app.Stdout.(*bytes.Buffer)
+	stdout.Reset()
+	if err := app.Execute([]string{"backup"}); err != nil {
+		t.Fatalf("backup should ignore existing backup branches: %v", err)
+	}
+	secondOutput := stdout.String()
+	for _, want := range []string{"master -> bkp/master (exists/sync)", "branch1 -> bkp/branch1 (exists/sync)"} {
+		if !strings.Contains(secondOutput, want) {
+			t.Fatalf("backup output missing %q:\n%s", want, secondOutput)
+		}
 	}
 
-	stdout := app.Stdout.(*bytes.Buffer)
+	mustGit(t, repo, "checkout", "branch1")
+	writeFile(t, filepath.Join(repo, "branch1.txt"), "branch1 updated\n")
+	mustGit(t, repo, "add", "branch1.txt")
+	mustGit(t, repo, "commit", "-m", "branch1 updated")
+
+	stdout.Reset()
+	if err := app.Execute([]string{"backup"}); err != nil {
+		t.Fatalf("backup should report branch1 as unsynced: %v", err)
+	}
+	thirdOutput := stdout.String()
+	for _, want := range []string{"master -> bkp/master (exists/sync)", "branch1 -> bkp/branch1 (exists/unsync)"} {
+		if !strings.Contains(thirdOutput, want) {
+			t.Fatalf("backup output missing %q:\n%s", want, thirdOutput)
+		}
+	}
+
 	stdout.Reset()
 	if err := app.Execute([]string{"backup", "--delete"}); err != nil {
 		t.Fatalf("backup --delete failed: %v", err)
@@ -773,7 +893,7 @@ func TestCompletionCommand(t *testing.T) {
 		t.Fatalf("Execute(completion bash) failed: %v", err)
 	}
 	bash := stdout.String()
-	for _, want := range []string{"complete -F _git_stack_completion git-stack", "compgen -W \"parent graph cascade backup completion version help --help -h --version -v --script\"", "--help -h", "--delete --help -h"} {
+	for _, want := range []string{"complete -F _git_stack_completion git-stack", "compgen -W \"parent graph cascade backup completion version help --help -h --version -v --script\"", "--help -h", "--delete --help -h", "--all --columns --format --help -h"} {
 		if !strings.Contains(bash, want) {
 			t.Fatalf("bash completion missing %q:\n%s", want, bash)
 		}
@@ -784,7 +904,7 @@ func TestCompletionCommand(t *testing.T) {
 		t.Fatalf("Execute(completion zsh) failed: %v", err)
 	}
 	zsh := stdout.String()
-	for _, want := range []string{"#compdef git-stack", "compdef _git_stack_completion git-stack", "1:command:(parent graph cascade backup completion version help --script)", "--delete[delete backup branches]"} {
+	for _, want := range []string{"#compdef git-stack", "compdef _git_stack_completion git-stack", "1:command:(parent graph cascade backup completion version help --script)", "--delete[delete backup branches]", "--all[show all declared branches]"} {
 		if !strings.Contains(zsh, want) {
 			t.Fatalf("zsh completion missing %q:\n%s", want, zsh)
 		}

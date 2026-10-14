@@ -25,6 +25,8 @@ Each script writes its repo into a matching directory under `sample/out/`.
 
 For command previews, use the root script flag, for example `git-stack --script cascade`.
 
+Cascade scripts remember the starting branch and switch back to it at the end.
+
 Pass a custom output directory as the first argument:
 
 ```bash

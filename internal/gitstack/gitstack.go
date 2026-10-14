@@ -200,7 +200,7 @@ func (a *App) parentHelp() error {
 }
 
 func (a *App) graphHelp() error {
-	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack graph [columns|--columns <list>|--format <list>]")
+	_, err := fmt.Fprintln(a.Stdout, "usage: git-stack graph [--all] [columns|--columns <list>|--format <list>]")
 	return err
 }
 
@@ -227,7 +227,7 @@ Usage:
 
 Commands:
   git-stack parent <parent> [<parent>...]  Set the current branch parent(s) in .git-stack
-  git-stack graph [columns]                Show the branch graph and sync state, with optional column filtering
+  git-stack graph [--all] [columns]        Show the branch graph and sync state, with optional column filtering
   git-stack cascade                        Apply the cascade from the current branch
   git-stack backup [--delete]              Create or delete backup branches with bkp/ prefix
   git-stack completion <bash|zsh>          Print shell completion script
@@ -266,7 +266,7 @@ func bashCompletionScript() string {
       COMPREPLY=( $(compgen -W "--delete --help -h" -- "$cur") )
       ;;
     graph)
-      COMPREPLY=( $(compgen -W "--columns --format --help -h" -- "$cur") )
+      COMPREPLY=( $(compgen -W "--all --columns --format --help -h" -- "$cur") )
       ;;
     completion)
       COMPREPLY=( $(compgen -W "bash zsh --help -h" -- "$cur") )
@@ -305,7 +305,7 @@ _git_stack_completion() {
           _arguments '--delete[delete backup branches]' '--help[show help]' '-h[show help]'
           ;;
         graph)
-          _arguments '--columns[filter graph columns]' '--format[filter graph columns]' '--help[show help]' '-h[show help]'
+          _arguments '--all[show all declared branches]' '--columns[filter graph columns]' '--format[filter graph columns]' '--help[show help]' '-h[show help]'
           ;;
         completion)
           _arguments '1:shell:(bash zsh)'
@@ -381,7 +381,7 @@ func (a *App) runParent(args []string) error {
 }
 
 func (a *App) runGraph(args []string) error {
-	columns, err := parseGraphColumns(args)
+	columns, showAll, err := parseGraphOptions(args)
 	if err != nil {
 		return err
 	}
@@ -398,11 +398,14 @@ func (a *App) runGraph(args []string) error {
 	if err != nil {
 		return err
 	}
-	order, err := cfg.Subtree(current)
+	order, err := cfg.Subtree(current, showAll)
 	if err != nil {
 		return err
 	}
 	if len(order) == 0 {
+		if showAll {
+			return cliErrorf("no branches declared in %s", ConfigFilename)
+		}
 		return cliErrorf("branch %q is not declared in %s", current, ConfigFilename)
 	}
 
@@ -440,12 +443,12 @@ func (a *App) runGraph(args []string) error {
 	}
 
 	children := cfg.childrenMap()
-	roots := graphRoots(cfg, current, order, reachable)
+	roots := graphRoots(cfg, current, order, reachable, showAll)
 	return writeGraphTable(a.Stdout, cfg, roots, children, rows, reachable, columns, colorEnabled(a.Stdout))
 }
 
-func graphRoots(cfg *ConfigFile, current string, order []string, reachable map[string]bool) []string {
-	if cfg.containsBranch(current) {
+func graphRoots(cfg *ConfigFile, current string, order []string, reachable map[string]bool, includeAll bool) []string {
+	if !includeAll && cfg.containsBranch(current) {
 		return []string{current}
 	}
 	roots := make([]string, 0, len(order))
@@ -515,48 +518,52 @@ func defaultGraphColumns() []graphColumn {
 	}
 }
 
-func parseGraphColumns(args []string) ([]graphColumn, error) {
+func parseGraphOptions(args []string) ([]graphColumn, bool, error) {
 	if len(args) == 0 {
-		return defaultGraphColumns(), nil
+		return defaultGraphColumns(), false, nil
 	}
 
 	var spec string
+	showAll := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
+		case arg == "--all":
+			showAll = true
 		case arg == "--columns" || arg == "--format" || arg == "-c":
 			if spec != "" {
-				return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+				return nil, false, cliErrorf("usage: git-stack graph [--all] [columns|--columns <list>|--format <list>]")
 			}
 			if i+1 >= len(args) {
-				return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+				return nil, false, cliErrorf("usage: git-stack graph [--all] [columns|--columns <list>|--format <list>]")
 			}
 			spec = args[i+1]
 			i++
 		case strings.HasPrefix(arg, "--columns="):
 			if spec != "" {
-				return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+				return nil, false, cliErrorf("usage: git-stack graph [--all] [columns|--columns <list>|--format <list>]")
 			}
 			spec = strings.TrimPrefix(arg, "--columns=")
 		case strings.HasPrefix(arg, "--format="):
 			if spec != "" {
-				return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+				return nil, false, cliErrorf("usage: git-stack graph [--all] [columns|--columns <list>|--format <list>]")
 			}
 			spec = strings.TrimPrefix(arg, "--format=")
 		case strings.HasPrefix(arg, "-"):
-			return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+			return nil, false, cliErrorf("usage: git-stack graph [--all] [columns|--columns <list>|--format <list>]")
 		default:
 			if spec != "" {
-				return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+				return nil, false, cliErrorf("usage: git-stack graph [--all] [columns|--columns <list>|--format <list>]")
 			}
 			spec = arg
 		}
 	}
 
 	if spec == "" {
-		return defaultGraphColumns(), nil
+		return defaultGraphColumns(), showAll, nil
 	}
-	return parseGraphColumnSpec(spec)
+	columns, err := parseGraphColumnSpec(spec)
+	return columns, showAll, err
 }
 
 func parseGraphColumnSpec(spec string) ([]graphColumn, error) {
@@ -564,7 +571,7 @@ func parseGraphColumnSpec(spec string) ([]graphColumn, error) {
 		return r == ',' || r == ' ' || r == '	' || r == '\n'
 	})
 	if len(tokens) == 0 {
-		return nil, cliErrorf("usage: git-stack graph [columns|--columns <list>|--format <list>]")
+		return nil, cliErrorf("usage: git-stack graph [--all] [columns|--columns <list>|--format <list>]")
 	}
 
 	if len(tokens) == 1 {
@@ -793,7 +800,7 @@ func (a *App) runCascade(args []string) error {
 	if err != nil {
 		return err
 	}
-	order, err := cfg.Subtree(current)
+	order, err := cfg.Subtree(current, false)
 	if err != nil {
 		return err
 	}
@@ -867,6 +874,9 @@ func (a *App) runCascade(args []string) error {
 		}
 		currentHashes[plan.Branch] = updated
 	}
+	if _, err := runGit(root, "checkout", current); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -901,19 +911,13 @@ func (a *App) runBackup(args []string) error {
 		} else if !ok {
 			return cliErrorf("branch %q does not exist", branch)
 		}
-		backupRef := backupBranchName(branch)
 		if deleteMode {
+			backupRef := backupBranchName(branch)
 			if ok, err := gitRefExists(root, backupRef); err != nil {
 				return err
 			} else if !ok {
 				return cliErrorf("backup branch %q does not exist", backupRef)
 			}
-			continue
-		}
-		if ok, err := gitRefExists(root, backupRef); err != nil {
-			return err
-		} else if ok {
-			return cliErrorf("backup branch %q already exists", backupRef)
 		}
 	}
 
@@ -921,21 +925,57 @@ func (a *App) runBackup(args []string) error {
 		return renderBackupScript(a.Stdout, branches, deleteMode)
 	}
 
-	for _, branch := range branches {
-		backupRef := backupBranchName(branch)
-		if deleteMode {
+	if deleteMode {
+		for _, branch := range branches {
+			backupRef := backupBranchName(branch)
 			if _, err := runGit(root, "branch", "-D", backupRef); err != nil {
 				return err
 			}
 			if _, err := fmt.Fprintf(a.Stdout, "deleted %s\n", backupRef); err != nil {
 				return err
 			}
-			continue
 		}
-		if _, err := runGit(root, "branch", backupRef, branch); err != nil {
+		return nil
+	}
+
+	type backupResult struct {
+		branch    string
+		backupRef string
+		status    string
+	}
+
+	results := make([]backupResult, 0, len(branches))
+	for _, branch := range branches {
+		backupRef := backupBranchName(branch)
+		branchHash, err := refHash(root, branch, nil)
+		if err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(a.Stdout, "%s -> %s\n", branch, backupRef); err != nil {
+		exists, err := gitRefExists(root, backupRef)
+		if err != nil {
+			return err
+		}
+		switch {
+		case !exists:
+			if _, err := runGit(root, "branch", backupRef, branch); err != nil {
+				return err
+			}
+			results = append(results, backupResult{branch: branch, backupRef: backupRef, status: "created"})
+		default:
+			backupHash, err := refHash(root, backupRef, nil)
+			if err != nil {
+				return err
+			}
+			status := "exists/unsync"
+			if branchHash == backupHash {
+				status = "exists/sync"
+			}
+			results = append(results, backupResult{branch: branch, backupRef: backupRef, status: status})
+		}
+	}
+
+	for _, result := range results {
+		if _, err := fmt.Fprintf(a.Stdout, "%s -> %s (%s)\n", result.branch, result.backupRef, result.status); err != nil {
 			return err
 		}
 	}
@@ -947,6 +987,12 @@ func renderCascadeScript(w io.Writer, plans []branchPlan) error {
 		return err
 	}
 	if _, err := fmt.Fprintln(w, "set -eu"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "current_branch=$(git branch --show-current)"); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(w); err != nil {
@@ -968,6 +1014,12 @@ func renderCascadeScript(w io.Writer, plans []branchPlan) error {
 		if _, err := fmt.Fprintln(w); err != nil {
 			return err
 		}
+	}
+	if _, err := fmt.Fprintln(w, "git checkout \"$current_branch\""); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1059,7 +1111,40 @@ func renderBackupScript(w io.Writer, branches []string, deleteMode bool) error {
 			}
 			continue
 		}
-		if _, err := fmt.Fprintf(w, "git branch %s %s\n", backupRef, branch); err != nil {
+		if _, err := fmt.Fprintf(w, "if git show-ref --verify --quiet refs/heads/%s; then\n", backupRef); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "  branch_hash=$(git rev-parse %s)\n", branch); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "  backup_hash=$(git rev-parse %s)\n", backupRef); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(w, "  if [ \"$branch_hash\" = \"$backup_hash\" ]; then"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "    echo %q\n", fmt.Sprintf("%s -> %s (exists/sync)", branch, backupRef)); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(w, "  else"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "    echo %q\n", fmt.Sprintf("%s -> %s (exists/unsync)", branch, backupRef)); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(w, "  fi"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(w, "else"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "  git branch %s %s\n", backupRef, branch); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "  echo %q\n", fmt.Sprintf("%s -> %s (created)", branch, backupRef)); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(w, "fi"); err != nil {
 			return err
 		}
 	}
@@ -1413,7 +1498,7 @@ func (c *ConfigFile) Save(path string) error {
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
-func (c *ConfigFile) Subtree(root string) ([]string, error) {
+func (c *ConfigFile) Subtree(root string, includeAll bool) ([]string, error) {
 	if len(c.Lines) == 0 {
 		return nil, nil
 	}
@@ -1429,7 +1514,11 @@ func (c *ConfigFile) Subtree(root string) ([]string, error) {
 			collect(child)
 		}
 	}
-	if c.containsBranch(root) {
+	if includeAll {
+		for _, branch := range c.Branches() {
+			collect(branch)
+		}
+	} else if c.containsBranch(root) {
 		collect(root)
 	} else {
 		for _, child := range children[root] {

@@ -102,9 +102,9 @@ The project should stay explicit and deterministic. The `.git-stack` file define
 Proposed commands:
 
 - `git-stack parent [name]` — create or update the current branch's parent entry in `.git-stack` using the current branch name and one or more comma-separated parent names.
-- `git-stack graph [columns]` — show branch states and cascade structure, with optional column filtering.
-- `git-stack cascade` — apply the cascade starting from the current branch.
-- `git-stack backup [--delete]` — create or delete backup branches with a `bkp/` prefix.
+- `git-stack graph [--all] [columns]` — show branch states and cascade structure, with optional column filtering; `--all` shows every declared branch.
+- `git-stack cascade` — apply the cascade starting from the current branch and return to the original branch when it completes.
+- `git-stack backup [--delete]` — create or delete backup branches with a `bkp/` prefix; existing backups are kept and reported as `exists/sync` or `exists/unsync`.
 - `git-stack --script <command> [args]` — print the shell script for scriptable commands.
 
 Behavior:
@@ -113,7 +113,8 @@ Behavior:
 - `graph` uses state labels plus colors.
 - `graph` shows every declared parent relation for merge branches.
 - `graph` orders output topologically.
-- `graph` is rooted at the current branch subtree and does not add a special current-branch indicator.
+- `graph` is rooted at the current branch subtree by default and does not add a special current-branch indicator.
+- `graph --all` shows every declared branch in topological order.
 - `graph` renders each line like `ab12cd3 [Sync] branch-name Commit title`.
 - `graph` includes the short commit hash, the state, the branch name, and the commit subject.
 - `cascade` starts from the current branch.
