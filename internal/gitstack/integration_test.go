@@ -412,7 +412,7 @@ func TestRootScriptFlagPrintsCascadeBackupAndGraphScripts(t *testing.T) {
 		t.Fatalf("backup should ignore existing backup branches: %v", err)
 	}
 	secondOutput := stdout.String()
-	for _, want := range []string{"master -> bkp/master (exists/sync)", "branch1 -> bkp/branch1 (exists/sync)"} {
+	for _, want := range []string{"Backup:", "branch name", "state", "backup branch name", "exists/sync", "master", "branch1", "bkp/master", "bkp/branch1"} {
 		if !strings.Contains(secondOutput, want) {
 			t.Fatalf("backup output missing %q:\n%s", want, secondOutput)
 		}
@@ -428,7 +428,7 @@ func TestRootScriptFlagPrintsCascadeBackupAndGraphScripts(t *testing.T) {
 		t.Fatalf("backup should report branch1 as unsynced: %v", err)
 	}
 	thirdOutput := stdout.String()
-	for _, want := range []string{"master -> bkp/master (exists/sync)", "branch1 -> bkp/branch1 (exists/unsync)"} {
+	for _, want := range []string{"Backup:", "branch name", "state", "backup branch name", "exists/sync", "exists/unsync", "master", "branch1", "bkp/master", "bkp/branch1"} {
 		if !strings.Contains(thirdOutput, want) {
 			t.Fatalf("backup output missing %q:\n%s", want, thirdOutput)
 		}
@@ -439,7 +439,7 @@ func TestRootScriptFlagPrintsCascadeBackupAndGraphScripts(t *testing.T) {
 		t.Fatalf("backup --delete failed: %v", err)
 	}
 	deleteOutput := stdout.String()
-	for _, want := range []string{"deleted bkp/master", "deleted bkp/branch1"} {
+	for _, want := range []string{"Backup delete:", "branch name", "status", "master", "Deleted", "branch1"} {
 		if !strings.Contains(deleteOutput, want) {
 			t.Fatalf("delete output missing %q:\n%s", want, deleteOutput)
 		}
@@ -832,7 +832,7 @@ func TestBackupCommandCreatesAndDeletesBackupBranches(t *testing.T) {
 	}
 
 	output := app.Stdout.(*bytes.Buffer).String()
-	for _, want := range []string{"master -> bkp/master (created)", "branch1 -> bkp/branch1 (created)"} {
+	for _, want := range []string{"Backup:", "branch name", "state", "backup branch name", "master", "created", "bkp/master", "branch1", "bkp/branch1"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("backup output missing %q:\n%s", want, output)
 		}
@@ -844,7 +844,7 @@ func TestBackupCommandCreatesAndDeletesBackupBranches(t *testing.T) {
 		t.Fatalf("backup should ignore existing backup branches: %v", err)
 	}
 	secondOutput := stdout.String()
-	for _, want := range []string{"master -> bkp/master (exists/sync)", "branch1 -> bkp/branch1 (exists/sync)"} {
+	for _, want := range []string{"Backup:", "branch name", "state", "backup branch name", "exists/sync", "master", "branch1", "bkp/master", "bkp/branch1"} {
 		if !strings.Contains(secondOutput, want) {
 			t.Fatalf("backup output missing %q:\n%s", want, secondOutput)
 		}
@@ -860,7 +860,7 @@ func TestBackupCommandCreatesAndDeletesBackupBranches(t *testing.T) {
 		t.Fatalf("backup should report branch1 as unsynced: %v", err)
 	}
 	thirdOutput := stdout.String()
-	for _, want := range []string{"master -> bkp/master (exists/sync)", "branch1 -> bkp/branch1 (exists/unsync)"} {
+	for _, want := range []string{"Backup:", "branch name", "state", "backup branch name", "exists/sync", "exists/unsync", "master", "branch1", "bkp/master", "bkp/branch1"} {
 		if !strings.Contains(thirdOutput, want) {
 			t.Fatalf("backup output missing %q:\n%s", want, thirdOutput)
 		}
@@ -871,7 +871,7 @@ func TestBackupCommandCreatesAndDeletesBackupBranches(t *testing.T) {
 		t.Fatalf("backup --delete failed: %v", err)
 	}
 	deleteOutput := stdout.String()
-	for _, want := range []string{"deleted bkp/master", "deleted bkp/branch1"} {
+	for _, want := range []string{"Backup delete:", "branch name", "status", "master", "Deleted", "branch1"} {
 		if !strings.Contains(deleteOutput, want) {
 			t.Fatalf("delete output missing %q:\n%s", want, deleteOutput)
 		}
@@ -881,6 +881,17 @@ func TestBackupCommandCreatesAndDeletesBackupBranches(t *testing.T) {
 		cmd.Dir = repo
 		if err := cmd.Run(); err == nil {
 			t.Fatalf("expected %s to be deleted", ref)
+		}
+	}
+
+	stdout.Reset()
+	if err := app.Execute([]string{"backup", "--delete"}); err != nil {
+		t.Fatalf("backup --delete should ignore missing backup branches: %v", err)
+	}
+	missingDeleteOutput := stdout.String()
+	for _, want := range []string{"Backup delete:", "branch name", "status", "Not found", "master", "branch1"} {
+		if !strings.Contains(missingDeleteOutput, want) {
+			t.Fatalf("missing-delete output missing %q:\n%s", want, missingDeleteOutput)
 		}
 	}
 }

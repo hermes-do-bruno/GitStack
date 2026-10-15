@@ -60,6 +60,17 @@ type branchPlan struct {
 	UpstreamHash string
 }
 
+type backupResult struct {
+	branch    string
+	backupRef string
+	status    string
+}
+
+type backupDeleteResult struct {
+	branch string
+	status string
+}
+
 type graphRow struct {
 	Chart   string
 	Hash    string
@@ -911,14 +922,6 @@ func (a *App) runBackup(args []string) error {
 		} else if !ok {
 			return cliErrorf("branch %q does not exist", branch)
 		}
-		if deleteMode {
-			backupRef := backupBranchName(branch)
-			if ok, err := gitRefExists(root, backupRef); err != nil {
-				return err
-			} else if !ok {
-				return cliErrorf("backup branch %q does not exist", backupRef)
-			}
-		}
 	}
 
 	if a.scriptMode {
@@ -926,22 +929,23 @@ func (a *App) runBackup(args []string) error {
 	}
 
 	if deleteMode {
+		results := make([]backupDeleteResult, 0, len(branches))
 		for _, branch := range branches {
 			backupRef := backupBranchName(branch)
+			exists, err := gitRefExists(root, backupRef)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				results = append(results, backupDeleteResult{branch: branch, status: "Not found"})
+				continue
+			}
 			if _, err := runGit(root, "branch", "-D", backupRef); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprintf(a.Stdout, "deleted %s\n", backupRef); err != nil {
-				return err
-			}
+			results = append(results, backupDeleteResult{branch: branch, status: "Deleted"})
 		}
-		return nil
-	}
-
-	type backupResult struct {
-		branch    string
-		backupRef string
-		status    string
+		return writeBackupDeleteTable(a.Stdout, results)
 	}
 
 	results := make([]backupResult, 0, len(branches))
@@ -974,8 +978,96 @@ func (a *App) runBackup(args []string) error {
 		}
 	}
 
+	return writeBackupTable(a.Stdout, results)
+}
+
+func writeBackupDeleteTable(w io.Writer, results []backupDeleteResult) error {
+	columns := []struct {
+		header string
+		value  func(backupDeleteResult) string
+	}{
+		{header: "branch name", value: func(r backupDeleteResult) string { return r.branch }},
+		{header: "status", value: func(r backupDeleteResult) string { return r.status }},
+	}
+
+	widths := make([]int, len(columns))
+	for i, column := range columns {
+		widths[i] = runeLen(column.header)
+		for _, result := range results {
+			widths[i] = max(widths[i], runeLen(column.value(result)))
+		}
+	}
+
+	if _, err := fmt.Fprintln(w, "Backup delete:"); err != nil {
+		return err
+	}
+	headerCells := make([]string, len(columns))
+	for i, column := range columns {
+		headerCells[i] = padRight(column.header, widths[i])
+	}
+	if _, err := fmt.Fprintln(w, strings.Join(headerCells, "  ")); err != nil {
+		return err
+	}
+	separator := make([]string, len(widths))
+	for i, width := range widths {
+		separator[i] = strings.Repeat("-", width)
+	}
+	if _, err := fmt.Fprintln(w, strings.Join(separator, "  ")); err != nil {
+		return err
+	}
 	for _, result := range results {
-		if _, err := fmt.Fprintf(a.Stdout, "%s -> %s (%s)\n", result.branch, result.backupRef, result.status); err != nil {
+		cells := make([]string, len(columns))
+		for i, column := range columns {
+			cells[i] = padRight(column.value(result), widths[i])
+		}
+		if _, err := fmt.Fprintln(w, strings.Join(cells, "  ")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeBackupTable(w io.Writer, results []backupResult) error {
+	columns := []struct {
+		header string
+		value  func(backupResult) string
+	}{
+		{header: "branch name", value: func(r backupResult) string { return r.branch }},
+		{header: "state", value: func(r backupResult) string { return r.status }},
+		{header: "backup branch name", value: func(r backupResult) string { return r.backupRef }},
+	}
+
+	widths := make([]int, len(columns))
+	for i, column := range columns {
+		widths[i] = runeLen(column.header)
+		for _, result := range results {
+			widths[i] = max(widths[i], runeLen(column.value(result)))
+		}
+	}
+
+	if _, err := fmt.Fprintln(w, "Backup:"); err != nil {
+		return err
+	}
+	headerCells := make([]string, len(columns))
+	for i, column := range columns {
+		headerCells[i] = padRight(column.header, widths[i])
+	}
+	if _, err := fmt.Fprintln(w, strings.Join(headerCells, "  ")); err != nil {
+		return err
+	}
+	separator := make([]string, len(widths))
+	for i, width := range widths {
+		separator[i] = strings.Repeat("-", width)
+	}
+	if _, err := fmt.Fprintln(w, strings.Join(separator, "  ")); err != nil {
+		return err
+	}
+	for _, result := range results {
+		cells := make([]string, len(columns))
+		for i, column := range columns {
+			cells[i] = padRight(column.value(result), widths[i])
+		}
+		if _, err := fmt.Fprintln(w, strings.Join(cells, "  ")); err != nil {
 			return err
 		}
 	}
@@ -1106,7 +1198,13 @@ func renderBackupScript(w io.Writer, branches []string, deleteMode bool) error {
 	for _, branch := range branches {
 		backupRef := backupBranchName(branch)
 		if deleteMode {
-			if _, err := fmt.Fprintf(w, "git branch -D %s\n", backupRef); err != nil {
+			if _, err := fmt.Fprintf(w, "if git show-ref --verify --quiet refs/heads/%s; then\n", backupRef); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, "  git branch -D %s\n", backupRef); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintln(w, "fi"); err != nil {
 				return err
 			}
 			continue

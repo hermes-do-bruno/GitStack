@@ -112,6 +112,6 @@ The root command also accepts `--script` to print the shell script for commands 
 - `git-stack parent [name]` — set the current branch parent(s) in `.git-stack`
 - `git-stack graph [--all] [columns]` — show the branch graph and sync state, with optional column filtering; `--all` shows every declared branch.
 - `git-stack cascade` — apply the cascade from the current branch and return to the original branch
-- `git-stack backup [--delete]` — create or delete backup branches with `bkp/` prefix; existing backups are kept and reported as `exists/sync` or `exists/unsync`
+- `git-stack backup [--delete]` — create or delete backup branches with `bkp/` prefix; the normal output is a sheet-like table with `branch name`, `state`, and `backup branch name`; delete mode uses `branch name` and `status` columns with `Deleted` or `Not found`
 - `git-stack completion <bash|zsh>` — print shell completion scripts
 - `git-stack version` — show the CLI version
